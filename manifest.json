@@ -1,0 +1,13 @@
+{
+  "name": "DBZ Money Maker",
+  "short_name": "DBZ Flip",
+  "description": "Scan Dragon Ball cards, compare raw vs graded prices, find the best grading flip.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#120404",
+  "theme_color": "#120404",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#120404" />
+  <title>DBZ Money Maker</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ===== Loading overlay (icon splash) ===== -->
+    <div id="dbz-loading" class="dbz-overlay hidden">
+      <div class="dbz-ring-wrap">
+        <div class="dbz-spin-ring"></div>
+        <div class="dbz-face"><img src="icons/icon-512.png" alt="Loading" /></div>
+      </div>
+      <div class="dbz-title">Scouter On</div>
+      <div class="dbz-sub" id="dbz-sub">Powering up…</div>
+    </div>
+
+    <!-- top bar -->
+    <header class="topbar">
+      <div class="tb-title" id="view-title">Scan</div>
+      <div class="tb-sub">Raw → Grade → Flip</div>
+    </header>
+
+    <!-- ============ SCAN ============ -->
+    <section id="pane-scan" class="pane active">
+      <div class="card-block">
+        <div class="sr-title">Search by name</div>
+        <p class="hint" style="margin-top:0">Know the card already? Type it and skip scanning.</p>
+        <label class="field"><span>Card name</span><input type="text" id="s-name" placeholder="e.g. Kakarot the One and Only" /></label>
+        <label class="field"><span>Card code / number (optional)</span><input type="text" id="s-code" placeholder="e.g. BT1-001" /></label>
+        <button class="btn-primary block" data-action="search-name">Look up prices →</button>
+      </div>
+
+      <div class="card-block">
+        <div class="sr-title">Or scan the card</div>
+        <p class="lead">Scan to read its <b>name</b> (top) and <b>card code</b> (bottom-right), then look up prices and calc the grading flip.</p>
+        <div id="cam-wrap" class="cam-wrap hidden">
+          <video id="cam" playsinline muted></video>
+          <div class="cam-guide"><span class="guide-top">Name strip</span><span class="guide-code">Card code</span></div>
+        </div>
+        <canvas id="cap-canvas" class="hidden"></canvas>
+        <div id="ocr-status" class="status hidden"></div>
+        <div class="btn-row">
+          <button class="btn-primary block" data-action="start-cam">📷 Open Camera</button>
+          <button class="btn-secondary block hidden" id="capture-btn" data-action="capture">Capture &amp; Read</button>
+        </div>
+        <label class="field"><span>Or upload a photo</span><input type="file" id="photo-input" accept="image/*" capture="environment" /></label>
+      </div>
+
+      <div id="scan-result" class="card-block hidden">
+        <div class="sr-title">Read from card</div>
+        <label class="field"><span>Card name</span><input type="text" id="f-name" placeholder="e.g. Kakarot the One and Only" /></label>
+        <label class="field"><span>Card code / number</span><input type="text" id="f-code" placeholder="e.g. BT1-001" /></label>
+        <p class="hint">OCR isn't perfect — fix anything it misread before looking up prices.</p>
+        <button class="btn-primary block" data-action="to-calc">Continue → Prices &amp; Flip</button>
+      </div>
+    </section>
+
+    <!-- ============ CALC ============ -->
+    <section id="pane-calc" class="pane">
+      <div class="card-block">
+        <div class="calc-head">
+          <div class="calc-card-name" id="calc-name">—</div>
+          <div class="calc-card-code" id="calc-code"></div>
+        </div>
+        <div class="ebay-links" id="ebay-links"></div>
+        <p class="hint">Tap a link to check eBay Buy-It-Now prices, then type what you see below.</p>
+      </div>
+
+      <div class="card-block">
+        <div class="sr-title">Prices you found</div>
+        <label class="field"><span>Raw price (what you'd pay) $</span><input type="number" id="p-raw" inputmode="decimal" step="0.01" placeholder="0.00" /></label>
+        <label class="field"><span>Grader</span>
+          <select id="grader-select">
+            <option value="BGS">BGS (Beckett)</option>
+            <option value="PSA">PSA</option>
+            <option value="CGC">CGC</option>
+          </select>
+        </label>
+        <label class="field"><span>Grading service</span>
+          <select id="service-select"></select>
+        </label>
+        <div class="grade-grid" id="grade-inputs"></div>
+        <div class="cost-row">
+          <label class="field"><span>Grading fee $ (auto — editable)</span><input type="number" id="p-fee" inputmode="decimal" step="0.01" placeholder="30" /></label>
+          <label class="field"><span>Ship + fees $</span><input type="number" id="p-ship" inputmode="decimal" step="0.01" placeholder="15" value="15" /></label>
+        </div>
+        <button class="btn-primary block" data-action="calc">Calculate Flip</button>
+      </div>
+
+      <div id="calc-result" class="card-block hidden">
+        <div class="sr-title">Flip breakdown</div>
+        <div id="flip-rows"></div>
+        <div id="best-flip" class="best-flip"></div>
+        <button class="btn-secondary block" data-action="save-card">Save this card</button>
+      </div>
+    </section>
+
+    <!-- ============ SAVED ============ -->
+    <section id="pane-saved" class="pane">
+      <div class="card-block">
+        <ul class="saved-list" id="saved-list"></ul>
+        <div id="saved-empty" class="empty"><p>No saved cards yet. Scan one and save the flip.</p></div>
+      </div>
+    </section>
+
+    <!-- ============ TOP FLIPS ============ -->
+    <section id="pane-top" class="pane">
+      <div class="card-block">
+        <div class="sr-title">Top DBZ TCG Flips</div>
+        <p class="hint" style="margin-top:0">Ranked by profit (graded sale − raw − grading − ship). Prices are editable starting estimates — tap a card to update with what you find on eBay. Sold-price auto-fill comes when the eBay API is connected.</p>
+        <div class="filter-row">
+          <label class="field"><span>Min raw $</span><input type="number" id="filt-min" inputmode="decimal" step="1" placeholder="0" /></label>
+          <label class="field"><span>Max raw $</span><input type="number" id="filt-max" inputmode="decimal" step="1" placeholder="9999" /></label>
+        </div>
+        <button class="btn-primary block" data-action="rank-top">Rank Top 10</button>
+        <div class="learn-row">
+          <button class="btn-secondary" data-action="review-corrections">📋 Review before export</button>
+          <button class="btn-secondary" data-action="export-learn">⬇ Export data</button>
+        </div>
+        <label class="btn-secondary import-lbl block">⬆ Import data<input type="file" id="import-learn" accept="application/json" hidden /></label>
+        <div id="corrections-review" class="corrections-review hidden"></div>
+        <p class="hint" style="margin-bottom:0">"Wrong" flags &amp; price edits are saved. Review &amp; add your own notes, then export to share with the developer so the app learns. Import an updated data file after an app update.</p>
+      </div>
+      <div class="card-block">
+        <ol class="top-list" id="top-list"></ol>
+      </div>
+    </section>
+
+    <!-- nav -->
+    <nav class="tabbar">
+      <button class="tab active" data-view="scan"><span class="tico">📷</span><span>Scan</span></button>
+      <button class="tab" data-view="calc"><span class="tico">🧮</span><span>Flip</span></button>
+      <button class="tab" data-view="top"><span class="tico">🏆</span><span>Top 10</span></button>
+      <button class="tab" data-view="saved"><span class="tico">⭐</span><span>Saved</span></button>
+    </nav>
+  </div>
+
+  <!-- Tesseract.js for on-device OCR (no API, no backend). Cached by SW after first load. -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        reg.update();
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update(); });
+        let reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (reloaded) return; reloaded = true; window.location.reload();
+        });
+      }).catch(()=>{});
+    });
+  </script>
+</body>
+</html>
