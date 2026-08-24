@@ -45,11 +45,19 @@ async function startCam() {
     const v = $('#cam'); v.srcObject = stream; await v.play();
     $('#cam-wrap').classList.remove('hidden');
     $('#capture-btn').classList.remove('hidden');
+    const btn = $('[data-action="start-cam"]'); if (btn) btn.textContent = '✕ Close Camera';
   } catch (e) {
     ocrStatus('Camera unavailable — use "Upload a photo" instead.', true);
   }
 }
-function stopCam() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } }
+function stopCam() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $('#cam-wrap').classList.add('hidden');
+  $('#capture-btn').classList.add('hidden');
+  const btn = $('[data-action="start-cam"]'); if (btn) btn.textContent = '📷 Open Camera';
+}
+// tapping the camera button toggles it open/closed
+function toggleCam() { if (stream) stopCam(); else startCam(); }
 
 function ocrStatus(msg, err) {
   const el = $('#ocr-status'); el.classList.remove('hidden');
@@ -494,7 +502,7 @@ document.body.addEventListener('click', e => {
   if (t) { showView(t.dataset.view); return; }
   if (!a) return;
   const map = {
-    'start-cam': startCam,
+    'start-cam': toggleCam,
     'capture': captureFromVideo,
     'search-name': () => {
       const nm = $('#s-name').value.trim();
