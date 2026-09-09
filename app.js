@@ -701,6 +701,9 @@ function openInvEditor(id){
   if (sel && !sel.options.length) Inventory.STATUSES.forEach(s=>{ const o=document.createElement('option'); o.value=s.key; o.textContent=s.label; sel.appendChild(o); });
   const a = it.acq||{}, g = it.grading||{}, sale = it.sale||{};
   $('#inv-ed-title').textContent = invItemName(it);
+  const card = Collection.getCard(it.cardKey) || {};
+  if ($('#ed-card-name')) $('#ed-card-name').value = card.name || '';
+  if ($('#ed-card-number')) $('#ed-card-number').value = card.number || '';
   $('#ed-acq-price').value = a.price ?? (it.purchaseCost ?? '');   // migrate old purchaseCost
   $('#ed-acq-ship').value = a.shipping ?? '';
   $('#ed-acq-tax').value = a.tax ?? '';
@@ -731,6 +734,16 @@ function updateInvBasisPreview(){
 }
 function saveInvEditor(){
   const it = invFindItem(invEditingId); if (!it) { closeInvEditor(); return; }
+  // apply card name/number edits first (may re-point cardKey)
+  const card = Collection.getCard(it.cardKey) || {};
+  const newName = ($('#ed-card-name') ? $('#ed-card-name').value.trim() : card.name) || card.name;
+  const newNum  = ($('#ed-card-number') ? $('#ed-card-number').value.trim() : card.number);
+  if (card && (newName !== card.name || newNum !== card.number)) {
+    Collection.renameCard(it.cardKey, { name:newName, number:newNum });
+    // refetch the item since its cardKey may have changed
+    const moved = (Collection.items()||[]).find(x => x.id === invEditingId);
+    if (moved) invEditingId = moved.id; // id is stable; cardKey updated internally
+  }
   const patch = {
     acq: { price:edNum('#ed-acq-price'), shipping:edNum('#ed-acq-ship'), tax:edNum('#ed-acq-tax'), other:edNum('#ed-acq-other'), date:$('#ed-acq-date').value||null },
     grading: { fee:edNum('#ed-grd-fee'), shipTo:edNum('#ed-grd-shipto'), shipBack:edNum('#ed-grd-shipback'), other:edNum('#ed-grd-other') },
@@ -811,6 +824,30 @@ function restoreBackupFile(file){
 }
 
 /* ---------- Add card directly to inventory (Business tab) ---------- */
+// Scan a card image and fill the add-card form's name/number (reuses OCR pipeline).
+async function scanIntoAddCard(file){
+  const st = $('#af-scan-status');
+  if (typeof Tesseract === 'undefined') { if(st) st.textContent = 'OCR still loading — try again in a second.'; return; }
+  if (st) st.textContent = 'Reading card…';
+  showLoader('Reading card…');
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = URL.createObjectURL(file); });
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img, 0, 0);
+    const W = c.width, H = c.height;
+    const nameRegion = cropCanvas(c, 0, 0, W, Math.round(H * 0.18));
+    const codeRegion = cropCanvas(c, Math.round(W * 0.55), Math.round(H * 0.82), Math.round(W * 0.45), Math.round(H * 0.18));
+    const [nameRes, codeRes] = await Promise.all([ Tesseract.recognize(nameRegion,'eng'), Tesseract.recognize(codeRegion,'eng') ]);
+    const name = cleanName(nameRes.data.text), code = cleanCode(codeRes.data.text);
+    if ($('#af-name')) $('#af-name').value = name;
+    if ($('#af-number')) $('#af-number').value = code;
+    if (st) st.textContent = '✓ Read — check & fix any misreads, then fill costs.';
+  } catch (e) {
+    if (st) st.textContent = 'Could not read the card — type it in manually.';
+  } finally { hideLoader(); }
+}
+
 function toggleAddCardForm(){
   const f = $('#inv-add-form'); if (!f) return;
   f.classList.toggle('hidden');
@@ -1352,6 +1389,7 @@ $('#photo-input').addEventListener('change', e => { if (e.target.files[0]) ocrFr
 $('#import-learn').addEventListener('change', e => { if (e.target.files[0]) importLearning(e.target.files[0]); e.target.value = ''; });
 $('#col-import').addEventListener('change', e => { if (e.target.files[0]) importCollection(e.target.files[0]); e.target.value = ''; });
 if ($('#backup-restore-file')) $('#backup-restore-file').addEventListener('change', e => { if (e.target.files[0]) restoreBackupFile(e.target.files[0]); e.target.value = ''; });
+if ($('#af-scan')) $('#af-scan').addEventListener('change', e => { if (e.target.files[0]) scanIntoAddCard(e.target.files[0]); e.target.value = ''; });
 $('#grader-select').addEventListener('change', renderGradeInputs);
 $('#service-select').addEventListener('change', applyServiceFee);
 

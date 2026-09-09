@@ -44,6 +44,35 @@ const Collection = (() => {
   function getCard(key){ return load(K_CARDS, {})[key] || null; }
   function allCards(){ return load(K_CARDS, {}); }
 
+  // Rename/renumber a card safely: because the key is derived from name|number|set|...,
+  // changing them produces a NEW key. We migrate the card record, re-point every owned
+  // item, and move price history so nothing loses its link.
+  function renameCard(oldKey, fields){
+    const cards = load(K_CARDS, {});
+    const old = cards[oldKey]; if (!old) return null;
+    const merged = { ...old, name: fields.name ?? old.name, number: fields.number ?? old.number,
+      set: fields.set ?? old.set, variant: fields.variant ?? old.variant, language: fields.language ?? old.language };
+    const newKey = cardKey(merged);
+    if (newKey === oldKey) { // identity unchanged (maybe only cosmetic) — just save
+      cards[oldKey] = { ...merged, key: oldKey }; save(K_CARDS, cards); return cards[oldKey];
+    }
+    // move card record
+    delete cards[oldKey];
+    cards[newKey] = { ...merged, key: newKey };
+    save(K_CARDS, cards);
+    // re-point items
+    const its = items(); let changed = false;
+    its.forEach(it => { if (it.cardKey === oldKey) { it.cardKey = newKey; changed = true; } });
+    if (changed) save(K_ITEMS, its);
+    // migrate price history (priceId starts with cardKey::...)
+    const prices = load(K_PRICES, {}); let pChanged = false;
+    Object.keys(prices).forEach(pid => {
+      if (pid.startsWith(oldKey + '::')) { const np = newKey + pid.slice(oldKey.length); prices[np] = prices[pid]; delete prices[pid]; pChanged = true; }
+    });
+    if (pChanged) save(K_PRICES, prices);
+    return cards[newKey];
+  }
+
   /* ---------- price history ---------- */
   // priceId groups a distinct market: cardKey :: source :: company(or RAW) :: grade(or -)
   function priceId(cardKey, source, company, grade){
@@ -161,7 +190,7 @@ const Collection = (() => {
   function importAll(d){ if(d.cards)save(K_CARDS,d.cards); if(d.items)save(K_ITEMS,d.items); if(d.prices)save(K_PRICES,d.prices); if(d.snapshots)save(K_SNAPS,d.snapshots); if(d.events)save(K_EVENTS,d.events); if(d.settings)save(K_SETTINGS,d.settings); }
 
   return {
-    cardKey, upsertCard, getCard, allCards,
+    cardKey, upsertCard, getCard, allCards, renameCard,
     recordPrice, priceHistory, latestPrice, priceId,
     items, addItem, updateItem, removeItem,
     unitValue, itemValue, collectionValue, totalCards,

@@ -235,6 +235,8 @@
         <div class="sr-title">TCG Inventory</div>
         <button class="btn-primary block" data-action="inv-add-open">+ Add Card to Inventory</button>
         <div id="inv-add-form" class="prod-form hidden">
+          <label class="btn-secondary block import-lbl">📷 Scan card to fill name &amp; number<input type="file" id="af-scan" accept="image/*" hidden /></label>
+          <p class="hint" id="af-scan-status" style="margin-top:2px"></p>
           <label class="field"><span>Card name</span><input type="text" id="af-name" placeholder="Son Gohan Youth"></label>
           <div class="cost-row">
             <label class="field"><span>Card #</span><input type="text" id="af-number" placeholder="FB03-139"></label>
@@ -367,6 +369,10 @@
           <button class="inv-ed-close" data-action="inv-ed-close" aria-label="Close">✕</button>
         </div>
         <div class="inv-editor-body">
+          <div class="inv-ed-group-title">Card</div>
+          <label class="field"><span>Card name</span><input type="text" id="ed-card-name" placeholder="Card name"></label>
+          <label class="field"><span>Card number</span><input type="text" id="ed-card-number" placeholder="FB03-139"></label>
+
           <div class="inv-ed-group-title">Acquisition costs</div>
           <div class="cost-row">
             <label class="field"><span>Purchase price</span><input type="number" id="ed-acq-price" inputmode="decimal" step="0.01" placeholder="0"></label>
@@ -449,7 +455,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v33';
+    window.APP_VERSION = 'v34';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');
