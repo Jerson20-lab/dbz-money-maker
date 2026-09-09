@@ -698,7 +698,63 @@ function renderInventory(){
   if (!listEl) { renderProducts(); return; }
   if (!filtered.length) { listEl.innerHTML = `<p class="hint">No items${invStatusFilter!=='all'?' with this status':''} yet. Add cards to your Collection and they'll appear here with full cost-basis tracking.</p>`; return; }
 
-  listEl.innerHTML = filtered.map(it => {
+  listEl.innerHTML = groupInventory(filtered).map(group => {
+    if (group.items.length === 1) return renderInvItemRow(group.items[0]);
+    return renderInvStack(group);
+  }).join('');
+  renderProducts();
+}
+
+// Group items into stacks: same card + condition + grade-company + grade + status.
+// Cost is NOT blended — each item keeps its own basis; the stack just sums for display.
+function invStackKey(it){
+  return [it.cardKey, it.condition||'raw', it.company||'', it.grade||'', it.status||'in_inventory'].join('||');
+}
+function groupInventory(items){
+  const map = new Map();
+  items.forEach(it => { const k = invStackKey(it); if(!map.has(k)) map.set(k, { key:k, items:[] }); map.get(k).items.push(it); });
+  return [...map.values()];
+}
+
+// A collapsed stack of 2+ identical cards: one summary row that expands to the individual copies.
+function renderInvStack(group){
+  const items = group.items;
+  const first = items[0];
+  const st = first.status || 'in_inventory';
+  const totalQty = items.reduce((s,it)=>s+(it.qty||1),0);
+  const totalBasis = items.reduce((s,it)=>s+Inventory.costBasisTotal(it),0);
+  const avgBasis = totalQty ? totalBasis/totalQty : 0;
+  const expanded = invExpanded === group.key;
+  // summed realized profit if all sold, else potential
+  let profitLine;
+  const allSold = items.every(it=>it.status==='sold' && it.sale);
+  if (allSold) {
+    const profit = items.reduce((s,it)=>{ const p=Inventory.profitability(it); return s+(p.profit||0)*(it.qty||1); },0);
+    profitLine = `<span class="${profit>=0?'pos':'neg'}">Sold ${items.length} · total profit ${money(Inventory.round2(profit))}</span>`;
+  } else {
+    profitLine = `<span class="muted">${items.length} copies · tap to expand</span>`;
+  }
+  const c = invItemCard(first);
+  const sub = items.map(it => renderInvItemRow(it)).join('');
+  return `<div class="inv-item inv-stack" data-inv-stack="${group.key}">
+      <div class="inv-item-head" data-action="inv-expand" data-id="${group.key}">
+        <div class="inv-thumb">${c.image?`<img src="${c.image}" alt="">`:'🃏'}</div>
+        <div class="inv-item-main">
+          <div class="inv-item-name">${escapeHtmlSafe(invItemName(first))} <span class="inv-stack-badge">×${totalQty}</span></div>
+          <div class="inv-item-sub">${invGradeLabel(first)} · ${items.length} entries · <span class="inv-badge inv-${st}">${Inventory.statusLabel(st)}</span></div>
+        </div>
+        <div class="inv-item-nums">
+          <div class="inv-basis">Total ${money(Inventory.round2(totalBasis))}</div>
+          <div class="inv-be">Avg ${money(Inventory.round2(avgBasis))}/ea</div>
+        </div>
+      </div>
+      <div class="inv-item-profit">${profitLine}</div>
+      ${expanded ? `<div class="inv-stack-items">${sub}</div>` : ''}
+    </div>`;
+}
+
+// Render ONE inventory item row (used for singles and for each copy inside an expanded stack).
+function renderInvItemRow(it){
     const basis = Inventory.costBasis(it);
     const p = Inventory.profitability(it);
     const st = it.status || 'in_inventory';
@@ -736,8 +792,6 @@ function renderInventory(){
             ? `<button class="btn-secondary block inv-edit-btn" data-action="grade-send" data-id="${it.id}">📮 Send to Grading</button>`
             : '')) : ''}
     </div>`;
-  }).join('');
-  renderProducts();
 }
 
 function escapeHtmlSafe(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -1329,16 +1383,27 @@ function renderHoldings(){
   const list = $('#holdings-list'); list.innerHTML = '';
   const its = Collection.items();
   $('#holdings-empty').classList.toggle('hidden', its.length>0);
+  // group identical cards (same card + condition + grade) into one holding entry
+  const groups = new Map();
   its.forEach(it => {
+    const k = [it.cardKey, it.condition||'raw', it.company||'', it.grade||''].join('||');
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(it);
+  });
+  [...groups.values()].forEach(entries => {
+    const it = entries[0];
     const card = Collection.getCard(it.cardKey) || {};
     const cond = it.condition==='graded' ? `${it.company} ${it.grade}` : 'Raw';
-    const uv = Collection.unitValue(it);
-    const tv = Collection.itemValue(it);
+    const totalQty = entries.reduce((s,x)=>s+(x.qty||1),0);
+    // total value across all copies in the group
+    let tv = 0, anyPrice = false;
+    entries.forEach(x => { const v = Collection.itemValue(x); if (v!=null){ tv += v; anyPrice = true; } });
+    const uv = anyPrice && totalQty ? tv/totalQty : null;
     const li = document.createElement('li'); li.className='holding-card';
     li.innerHTML = `
-      <div class="hc-top"><span class="hc-thumb">${card.image?`<img src="${card.image}" alt="">`:'🃏'}</span><span class="hc-name">${esc(card.name||'Unknown')}</span><span class="hc-cond">${esc(cond)} ×${it.qty}</span></div>
-      <div class="hc-meta">${esc(card.number||'')}${card.set?` · ${esc(card.set)}`:''}</div>
-      <div class="hc-val">${uv==null?'<span class="neg">No price recorded</span>':`${money(uv)} ea → <b>${money(tv)}</b>`}</div>
+      <div class="hc-top"><span class="hc-thumb">${card.image?`<img src="${card.image}" alt="">`:'🃏'}</span><span class="hc-name">${esc(card.name||'Unknown')}</span><span class="hc-cond">${esc(cond)} ×${totalQty}</span></div>
+      <div class="hc-meta">${esc(card.number||'')}${card.set?` · ${esc(card.set)}`:''}${entries.length>1?` · ${entries.length} entries`:''}</div>
+      <div class="hc-val">${uv==null?'<span class="neg">No price recorded</span>':`${money(Math.round(uv*100)/100)} ea → <b>${money(Math.round(tv*100)/100)}</b>`}</div>
       <div class="hc-actions">
         <button class="mini-btn" data-cd="${esc(it.cardKey)}">Details</button>
         <button class="mini-btn" data-remove-item="${it.id}">Remove</button>
