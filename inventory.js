@@ -44,10 +44,25 @@ const Inventory = (() => {
     const g = item.grading || {};
     const acq = n(a.price) + n(a.shipping) + n(a.tax) + n(a.other);
     const grd = n(g.fee) + n(g.shipTo) + n(g.shipBack) + n(g.insurance) + n(g.other);
-    return round2(acq + grd);
+    // If this card was pulled from a sealed product, add its allocated share of the box/blister cost.
+    const alloc = (item.id && window.Products && window.Products.allocatedCostForItem) ? window.Products.allocatedCostForItem(item.id) : 0;
+    return round2(acq + grd + alloc);
   }
-  // Total basis across all copies: acquisition is per-unit (×qty), grading is per-item (×1).
+  // Total basis across all copies: acquisition is per-unit (×qty), grading + allocated pull cost per-item (×1).
   function costBasisTotal(item){
+    if (!item) return 0;
+    const a = item.acq || {};
+    const g = item.grading || {};
+    const qty = item.qty || 1;
+    const acq = (n(a.price) + n(a.shipping) + n(a.tax) + n(a.other)) * qty;
+    const grd = n(g.fee) + n(g.shipTo) + n(g.shipBack) + n(g.insurance) + n(g.other);
+    const alloc = (item.id && window.Products && window.Products.allocatedCostForItem) ? window.Products.allocatedCostForItem(item.id) : 0;
+    return round2(acq + grd + alloc);
+  }
+  // ACCOUNTING basis (for P&L/snapshot): acquisition×qty + grading. EXCLUDES allocated pull cost,
+  // because a pulled card's box cost is already counted as the sealed-product expense — including it
+  // here would double-count. Use costBasis/costBasisTotal (with allocation) for per-card break-even display.
+  function costBasisAccounting(item){
     if (!item) return 0;
     const a = item.acq || {};
     const g = item.grading || {};
@@ -160,7 +175,7 @@ const Inventory = (() => {
     STATUSES, MARGINS,
     settings, setSettings,
     costBasis, feeOn, netRevenue,
-    costBasisTotal,
+    costBasisTotal, costBasisAccounting,
     minSellForMargin, minSellTable, breakEven,
     estValue, profitability,
     setStatus, statusLabel, round2,

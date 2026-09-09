@@ -12,8 +12,9 @@
  *      unitsTotal = qty + opened (for cost-per-unit)
  *  session = { id, productId, unitLabel, date, cardItemIds:[], note }
  *      links one opened unit to the collection items pulled from it.
- *  Each pulled card is a normal Collection item, tagged sourceProductId + sourceSessionId,
- *  with its acq.price seeded from the product's per-unit cost (allocated).
+ *  Each pulled card is a normal Collection item, tagged sourceProductId + sourceSessionId.
+ *  Pulls carry $0 acquisition cost (the box's cost is one product-level expense, counted once).
+ *  For per-card break-even display, allocatedCostForItem() spreads the unit cost across its pulls.
  */
 'use strict';
 
@@ -82,6 +83,24 @@ const Products = (() => {
   }
   function sessionsForProduct(productId){ return sessions().filter(s=>s.productId===productId); }
 
+  // Allocated cost for ONE pulled card = its unit's per-unit cost ÷ number of pulls in that session.
+  // e.g. blister $17.60 with 2 pulls -> each pull allocated $8.80. Box $100 with 12 pulls -> $8.33 each.
+  // Returns 0 if the card isn't a pull or its session/product is missing.
+  function allocatedCostForItem(cardItemId){
+    const s = sessions().find(x => x.cardItemIds.includes(cardItemId));
+    if (!s) return 0;
+    const p = getProduct(s.productId); if (!p) return 0;
+    const pulls = s.cardItemIds.length || 1;
+    return r2((p.costPerUnit || 0) / pulls);
+  }
+  // Which session/product a card came from (traceability helper for UI).
+  function sourceOfItem(cardItemId){
+    const s = sessions().find(x => x.cardItemIds.includes(cardItemId));
+    if (!s) return null;
+    const p = getProduct(s.productId);
+    return { session:s, product:p };
+  }
+
   /* ---------- product profitability (#11,#19) ----------
    * Needs Collection (for pulled-card values) + Inventory (cost basis, sale info).
    */
@@ -141,6 +160,7 @@ const Products = (() => {
     TYPES, products, sessions, getProduct, getSession, totalCost,
     addProduct, updateProduct, removeProduct,
     openUnit, addPullToSession, removePullFromSession, sessionsForProduct,
+    allocatedCostForItem, sourceOfItem,
     productProfit, profitBySet, today
   };
 })();

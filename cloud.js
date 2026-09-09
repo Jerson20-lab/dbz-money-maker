@@ -77,6 +77,30 @@ const Cloud = {
   async dequeue(path){
     if(!this.configured()) return;
     await fetch(`${this.base()}/queue/${this.safe(path)}.json`, { method:'DELETE' });
+  },
+
+  // Phone publishes its held-card list so the extension can auto-refresh them daily.
+  // cards = [{ name, code, set, variant }]
+  async putHeldCards(cards){
+    if(!this.configured()) return;
+    await fetch(`${this.base()}/heldCards.json`, { method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ cards: cards||[], when: new Date().toISOString() }) });
+  },
+  async getHeldCards(){
+    if(!this.configured()) return [];
+    const r = await fetch(`${this.base()}/heldCards.json`); if(!r.ok) return [];
+    const o = await r.json(); return (o && Array.isArray(o.cards)) ? o.cards : [];
+  },
+
+  // Small meta store (e.g. lastDailyRefresh timestamp) for the once-a-day auto refresh.
+  async getMeta(field){
+    if(!this.configured()) return null;
+    const r = await fetch(`${this.base()}/meta/${this.safe(field)}.json`); if(!r.ok) return null;
+    return await r.json();
+  },
+  async setMeta(field, value){
+    if(!this.configured()) return;
+    await fetch(`${this.base()}/meta/${this.safe(field)}.json`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(value) });
   }
 };
 

@@ -279,6 +279,15 @@
         <button class="btn-primary block" data-action="bridge-copy">📋 Copy Data for Profit Track</button>
         <textarea id="bridge-json" class="bridge-json" readonly placeholder="Tap Copy Data — the export appears here too."></textarea>
         <div id="bridge-status" class="auto-status"></div>
+      </div>
+      <div class="card-block">
+        <div class="sr-title">💾 Backup &amp; Restore</div>
+        <p class="hint" style="margin-top:0">Auto-backs up every 3 days and auto-restores only if data ever goes missing. Download a copy to keep it safe off your phone.</p>
+        <div id="backup-status" class="inv-summary"></div>
+        <button class="btn-secondary block" data-action="backup-now">💾 Back up now</button>
+        <button class="btn-secondary block" data-action="backup-download">⬇ Download backup file</button>
+        <label class="btn-secondary block import-lbl">⬆ Restore from file<input type="file" id="backup-restore-file" accept="application/json" hidden /></label>
+        <p class="hint" id="backup-restore-status" style="margin-top:4px"></p>
       <div class="card-block">
         <div id="inv-list" class="inv-list"></div>
       </div>
@@ -417,6 +426,7 @@
   <script src="inventory.js"></script>
   <script src="bridge-export.js"></script>
   <script src="products.js"></script>
+  <script src="backup.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) window.addEventListener('load', () => {
@@ -437,17 +447,21 @@
         });
       }).catch(()=>{});
     });
-    // one-time "App Updated" banner after an auto-update reload
+    // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
+    // APP_VERSION must match the sw.js cache version (dbz-vNN).
+    window.APP_VERSION = 'v33';
     window.addEventListener('load', () => {
       try {
-        if (sessionStorage.getItem('appJustUpdated') === '1') {
-          sessionStorage.removeItem('appJustUpdated');
+        const seen = localStorage.getItem('dbz.seenVersion');
+        // show banner only when we've seen a DIFFERENT version before (not first-ever install)
+        if (seen && seen !== window.APP_VERSION) {
           const b = document.createElement('div');
           b.className = 'update-banner';
-          b.innerHTML = '<div class="ub-row"><span>✓ App updated to the latest version</span><button aria-label="Close">✕</button></div><img class="ub-img" src="update-banner.png" alt="">';
+          b.innerHTML = '<div class="ub-row"><span>✓ App updated to ' + window.APP_VERSION + '</span><button aria-label="Close">✕</button></div><img class="ub-img" src="update-banner.png" alt="">';
           b.querySelector('button').addEventListener('click', () => b.remove());
           document.body.appendChild(b);
         }
+        localStorage.setItem('dbz.seenVersion', window.APP_VERSION);
       } catch (e) {}
     });
   </script>

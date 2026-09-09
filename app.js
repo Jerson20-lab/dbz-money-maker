@@ -597,6 +597,8 @@ function invGradeLabel(it){
 
 function renderInventory(){
   renderBizDashboard();
+  renderBackupStatus();
+  publishHeldCards();
   // populate status filter once
   const sel = $('#inv-status-filter');
   if (sel && sel.options.length <= 1) {
@@ -760,6 +762,52 @@ async function copyBridgeData(){
     if (ta) { ta.focus(); ta.select(); }
     if (st) { st.textContent = 'Couldn\u2019t auto-copy — the data is selected below, copy it manually.'; st.style.color = '#ffcf5c'; }
   }
+}
+
+/* ---------- Publish held cards for daily auto-refresh ---------- */
+let _lastHeldPublish = 0;
+async function publishHeldCards(){
+  if (!window.Cloud || !Cloud.configured()) return;
+  // throttle: at most once per 60s
+  if (Date.now() - _lastHeldPublish < 60000) return;
+  _lastHeldPublish = Date.now();
+  try {
+    const held = (Collection.items()||[]).filter(it => it.status !== 'sold');
+    const seen = {};
+    const cards = [];
+    held.forEach(it => {
+      const c = Collection.getCard(it.cardKey); if (!c) return;
+      const k = Cloud.keyFor(c.name, c.number);
+      if (seen[k]) return; seen[k] = 1;
+      cards.push({ name:c.name, code:c.number||'', set:c.set||'', variant:c.variant||'' });
+    });
+    await Cloud.putHeldCards(cards);
+  } catch (e) {}
+}
+
+/* ---------- Backup & Restore (data safety) ---------- */
+function renderBackupStatus(){
+  const el = $('#backup-status'); if (!el || !window.Backup) return;
+  const when = Backup.lastBackupWhen();
+  el.innerHTML = `<div class="inv-sum-row"><span>Last backup</span><b>${when ? when.slice(0,16).replace('T',' ') : 'never'}</b></div>`+
+                 `<div class="inv-sum-row"><span>Auto-backup</span><b>every 3 days</b></div>`;
+}
+function backupNowUI(){
+  if (!window.Backup) return;
+  const ok = Backup.backupNow();
+  const s = $('#backup-restore-status');
+  if (s) { s.textContent = ok ? '✓ Backed up.' : 'Backup failed (storage full?).'; s.style.color = ok ? '#38d17a' : '#ff8b7f'; }
+  renderBackupStatus();
+}
+function restoreBackupFile(file){
+  const r = new FileReader();
+  r.onload = e => {
+    const res = Backup.restoreFromText(e.target.result);
+    const s = $('#backup-restore-status');
+    if (res.ok) { s.textContent = `✓ Restored from ${(res.when||'').slice(0,10)}. Reloading…`; s.style.color='#38d17a'; setTimeout(()=>location.reload(), 900); }
+    else { s.textContent = res.error || 'Restore failed.'; s.style.color='#ff8b7f'; }
+  };
+  r.readAsText(file);
 }
 
 /* ---------- Add card directly to inventory (Business tab) ---------- */
@@ -1282,6 +1330,8 @@ document.body.addEventListener('click', e => {
   if (a.dataset.action === 'dash-refresh-all') { refreshAllHeld(); return; }
   if (a.dataset.action === 'inv-add-open') { toggleAddCardForm(); return; }
   if (a.dataset.action === 'inv-add-save') { saveAddCard(); return; }
+  if (a.dataset.action === 'backup-now') { backupNowUI(); return; }
+  if (a.dataset.action === 'backup-download') { if(window.Backup) Backup.downloadBackup(); return; }
   if (map[a.dataset.action]) map[a.dataset.action]();
 });
 // inventory filter + search
@@ -1301,8 +1351,12 @@ if ($('#af-cond')) $('#af-cond').addEventListener('change', updateAddCardGradeRo
 $('#photo-input').addEventListener('change', e => { if (e.target.files[0]) ocrFromFile(e.target.files[0]); e.target.value = ''; });
 $('#import-learn').addEventListener('change', e => { if (e.target.files[0]) importLearning(e.target.files[0]); e.target.value = ''; });
 $('#col-import').addEventListener('change', e => { if (e.target.files[0]) importCollection(e.target.files[0]); e.target.value = ''; });
+if ($('#backup-restore-file')) $('#backup-restore-file').addEventListener('change', e => { if (e.target.files[0]) restoreBackupFile(e.target.files[0]); e.target.value = ''; });
 $('#grader-select').addEventListener('change', renderGradeInputs);
 $('#service-select').addEventListener('change', applyServiceFee);
+
+// DATA SAFETY: auto-restore if data is missing, auto-backup every 3 days. Runs before UI.
+try { if (window.Backup) Backup.tick(); } catch (e) {}
 
 renderGradeInputs();
 if ($('#helper-url')) $('#helper-url').value = helperUrl();

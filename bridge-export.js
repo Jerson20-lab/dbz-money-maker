@@ -117,7 +117,7 @@ const BridgeExport = (() => {
       const qty = it.qty || 1;
       if (it.status === 'sold') { sold += qty; return; }
       if (window.Inventory) {
-        costBasis += window.Inventory.costBasisTotal(it);
+        costBasis += window.Inventory.costBasisAccounting(it);
         const ev = window.Inventory.estValue(it); if (ev != null) estValue += ev * qty;
       }
       unitsHeld += qty;
@@ -167,7 +167,7 @@ const BridgeExport = (() => {
       } else {
         cards += qty;
         if (window.Inventory) {
-          cardBasis += window.Inventory.costBasisTotal(it);
+          cardBasis += window.Inventory.costBasisAccounting(it);
           const ev = window.Inventory.estValue(it); if (ev!=null) cardEst += ev*qty;
           const p = window.Inventory.profitability(it); if (p && p.potentialProfit!=null) unrealizedProfit += p.potentialProfit*qty;
         }
