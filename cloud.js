@@ -101,6 +101,17 @@ const Cloud = {
   async setMeta(field, value){
     if(!this.configured()) return;
     await fetch(`${this.base()}/meta/${this.safe(field)}.json`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(value) });
+  },
+
+  // DBZ writes its ProfitTrack ledger here; ProfitTrack reads it (same dedupe as copy-paste).
+  async putLedger(payload){
+    if(!this.configured()) return;
+    await fetch(`${this.base()}/dbzLedger.json`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  },
+  async getLedger(){
+    if(!this.configured()) return null;
+    const r = await fetch(`${this.base()}/dbzLedger.json`); if(!r.ok) return null;
+    return await r.json();
   }
 };
 

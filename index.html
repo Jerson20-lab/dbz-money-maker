@@ -229,6 +229,7 @@
         </div>
         <div class="dash-grid" id="dash-grid"></div>
         <button class="btn-secondary block" data-action="dash-refresh-all" style="margin-top:10px">🔄 Update prices (stale cards only)</button>
+        <button class="btn-secondary block" data-action="dash-sync-cloud" style="margin-top:6px">☁️ Sync prices from cloud</button>
         <p class="hint" id="dash-refresh-note" style="margin-top:4px">Only fetches cards not updated in 7+ days — keeps volume low. Fetch runs in the Chrome extension.</p>
       </div>
       <div class="card-block">
@@ -463,7 +464,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v41';
+    window.APP_VERSION = 'v45';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

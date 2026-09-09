@@ -22,13 +22,40 @@ function memKey(name, code, grader) {
 }
 function loadMemory() { try { return JSON.parse(localStorage.getItem('dbz.priceMemory') || '{}'); } catch (e) { return {}; } }
 function saveMemory(m) { localStorage.setItem('dbz.priceMemory', JSON.stringify(m)); }
+// --- UNIFIED PRICE STORE ---
+// Market prices (raw + graded) live in ONE place: Collection.recordPrice / latestPrice.
+// So a price entered/pulled ANYWHERE (Flip, card refresh, extension) shows EVERYWHERE.
+// fee/ship are user settings (not market data) — kept in a tiny side-map by card+grader.
 function rememberPrices(name, code, grader, data) {
+  const card = Collection.upsertCard({ name, number: code, set:'', variant:'', language:'EN' });
+  // record raw price into the shared store
+  if (data.raw != null && isFinite(+data.raw) && +data.raw > 0) {
+    Collection.recordPrice(card.key, 'ebay', 'RAW', null, +data.raw);
+  }
+  // record each graded price under this grader (company), kept separate
+  if (data.grades) {
+    Object.keys(data.grades).forEach(g => {
+      const v = +data.grades[g];
+      if (isFinite(v) && v > 0) Collection.recordPrice(card.key, 'ebay', grader, g, v);
+    });
+  }
+  // fee/ship side-map (per card+grader) — these are inputs, not market prices
   const m = loadMemory();
-  m[memKey(name, code, grader)] = { ...data, when: new Date().toISOString().slice(0,10) };
+  m[memKey(name, code, grader)] = { fee: data.fee, ship: data.ship, when: new Date().toISOString().slice(0,10) };
   saveMemory(m);
 }
 function recallPrices(name, code, grader) {
-  return loadMemory()[memKey(name, code, grader)] || null;
+  const card = Collection.getCard(Collection.cardKey({ name, number:code, set:'', variant:'', language:'EN' }));
+  const side = loadMemory()[memKey(name, code, grader)] || {};
+  const key = Collection.cardKey({ name, number:code, set:'', variant:'', language:'EN' });
+  const raw = Collection.latestPrice(key, 'ebay', 'RAW', null);
+  // pull latest graded prices for this grader
+  const grades = {};
+  ['10','9.5','9','8'].forEach(g => { const v = Collection.latestPrice(key, 'ebay', grader, g); if (v != null) grades[g] = v; });
+  const hasAny = raw != null || Object.keys(grades).length > 0 || side.fee != null || side.ship != null;
+  if (!hasAny) return null;
+  // "when" = most recent price date we have, else the side-map date
+  return { raw, grades, fee: side.fee, ship: side.ship, when: side.when || Collection.today() };
 }
 
 /* ---------- reusable loading overlay ----------
@@ -69,8 +96,8 @@ function showView(v) {
   $('#view-title').textContent = { scan: 'Scan', calc: 'Flip', collection: 'Collection', carddetail: 'Card', inventory: 'Business', top: 'Top 10', saved: 'Saved' }[v] || 'DBZ';
   if (v === 'saved') renderSaved();
   if (v === 'top') rankTop();
-  if (v === 'collection') renderCollection();
-  if (v === 'inventory') renderInventory();
+  if (v === 'collection') { renderCollection(); syncAllCloudPrices().then(n=>{ if(n) renderCollection(); }); }
+  if (v === 'inventory') { renderInventory(); syncAllCloudPrices().then(n=>{ if(n) renderInventory(); }); }
 }
 
 /* ---------- camera + OCR ---------- */
@@ -603,6 +630,7 @@ function renderInventory(){
   renderBizDashboard();
   renderBackupStatus();
   publishHeldCards();
+  pushLedgerToCloud();
   // populate status filter once
   const sel = $('#inv-status-filter');
   if (sel && sel.options.length <= 1) {
@@ -794,6 +822,15 @@ async function copyBridgeData(){
     if (ta) { ta.focus(); ta.select(); }
     if (st) { st.textContent = 'Couldn\u2019t auto-copy — the data is selected below, copy it manually.'; st.style.color = '#ffcf5c'; }
   }
+}
+
+/* ---------- Push ProfitTrack ledger to cloud (same payload as copy-paste export) ---------- */
+let _lastLedgerPush = 0;
+async function pushLedgerToCloud(){
+  if (!window.Cloud || !Cloud.configured() || !window.BridgeExport) return;
+  if (Date.now() - _lastLedgerPush < 30000) return;   // throttle to once/30s
+  _lastLedgerPush = Date.now();
+  try { await Cloud.putLedger(BridgeExport.buildPayload()); } catch (e) {}
 }
 
 /* ---------- Publish held cards for daily auto-refresh ---------- */
@@ -1203,9 +1240,11 @@ function drawChart(canvasId, points, readoutId, dateFmt){
     return;
   }
   cssW = Math.min(cssW, 560);                 // clamp to a sane max width
-  const cssH = canvas.getAttribute('height') ? +canvas.getAttribute('height') : 180;
-  canvas.style.width = cssW+'px'; canvas.style.height = cssH+'px';
-  canvas.width = cssW*dpr; canvas.height = cssH*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,cssW,cssH);
+  const cssH = canvasId === 'cd-chart' ? 160 : 180;   // fixed display height (matches CSS, never grows)
+  // Do NOT set canvas.style.* here — CSS owns the display size (prevents iOS height feedback loop).
+  // Only set the drawing buffer to match display size × DPR.
+  canvas.width = Math.round(cssW*dpr); canvas.height = Math.round(cssH*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,cssW,cssH);
   const pad = {l:8,r:8,t:14,b:14}; const w = cssW-pad.l-pad.r, h = cssH-pad.t-pad.b;
   if (!points.length) { ctx.fillStyle='#a86a63'; ctx.font='13px -apple-system,sans-serif'; ctx.textAlign='center'; ctx.fillText('No history yet — refresh prices to start tracking',cssW/2,cssH/2); return; }
   const vals = points.map(p=>p.value); let min=Math.min(...vals), max=Math.max(...vals);
@@ -1271,6 +1310,33 @@ const GRADE_ROWS = [
   {co:'CGC',g:'10'},{co:'CGC',g:'9.5'},{co:'CGC',g:'9'}
 ];
 const PRICE_SOURCES = ['tcgplayer','ebay','130point'];
+
+// BULK cloud->app feed: pull EVERY card's cloud prices into Collection in one go.
+// Uses the cloud we set up — so prices fetched by the extension flow into the whole app
+// without opening each card. Returns how many cards got new data.
+async function syncAllCloudPrices(){
+  if (!window.Cloud || !Cloud.configured()) return 0;
+  const cards = Collection.allCards();
+  const keys = Object.keys(cards);
+  let updated = 0;
+  const v = s => (s && s.trimmedAvg != null) ? s.trimmedAvg : null;
+  for (const key of keys) {
+    const c = cards[key];
+    let got=null; try { got = await Cloud.getPrice(Cloud.keyFor(c.name, c.number)); } catch(e){}
+    if (!got || !got.when) continue;
+    if (_lastSynced[key] === got.when) continue;   // already have this snapshot
+    _lastSynced[key] = got.when;
+    let recorded=false;
+    ['ebay','tcgplayer','130point'].forEach(src=>{
+      const node=got[src]; if(!node) return;
+      if (v(node.raw)!=null){ Collection.recordPrice(key, src, 'RAW', null, v(node.raw), node.raw); recorded=true; }
+      ['PSA','BGS','CGC','SGC'].forEach(co => { if(!node[co])return; Object.keys(node[co]).forEach(g=>{ const p=v(node[co][g]); if(p!=null){ Collection.recordPrice(key, src, co, g, p, node[co][g]); recorded=true; } }); });
+    });
+    if (recorded) updated++;
+  }
+  if (updated) Collection.snapshotNow();
+  return updated;
+}
 
 // One-shot: read this card's cloud prices; if any are newer than what we have, record + re-render.
 let _lastSynced = {};
@@ -1451,6 +1517,11 @@ document.body.addEventListener('click', e => {
   if (a.dataset.action === 'grade-ed-close') { closeGradeEditor(); return; }
   if (a.dataset.action === 'grade-ed-save') { saveGradeEditor(); return; }
   if (a.dataset.action === 'dash-refresh-all') { refreshAllHeld(); return; }
+  if (a.dataset.action === 'dash-sync-cloud') {
+    const note=$('#dash-refresh-note'); if(note) note.textContent='Syncing prices from cloud…';
+    syncAllCloudPrices().then(n=>{ if(note) note.textContent = n ? `☁️ Synced ${n} card${n===1?'':'s'} from cloud.` : 'Nothing new in the cloud yet.'; renderInventory(); });
+    return;
+  }
   if (a.dataset.action === 'inv-add-open') { toggleAddCardForm(); return; }
   if (a.dataset.action === 'inv-add-save') { saveAddCard(); return; }
   if (a.dataset.action === 'backup-now') { backupNowUI(); return; }
@@ -1483,6 +1554,22 @@ $('#service-select').addEventListener('change', applyServiceFee);
 
 // DATA SAFETY: auto-restore if data is missing, auto-backup every 3 days. Runs before UI.
 try { if (window.Backup) Backup.tick(); } catch (e) {}
+
+// ONE-TIME: migrate old dbz.priceMemory raw/grade prices into the unified Collection store.
+try {
+  if (!localStorage.getItem('dbz.priceMemoryMigrated')) {
+    const mem = JSON.parse(localStorage.getItem('dbz.priceMemory') || '{}');
+    Object.keys(mem).forEach(k => {
+      const parts = k.split('|'); const name = parts[0], code = parts[1], grader = (parts[2]||'').toUpperCase();
+      if (!name) return;
+      const d = mem[k] || {};
+      const card = Collection.upsertCard({ name, number: code, set:'', variant:'', language:'EN' });
+      if (d.raw != null && +d.raw > 0) Collection.recordPrice(card.key, 'ebay', 'RAW', null, +d.raw);
+      if (d.grades) Object.keys(d.grades).forEach(g => { const v = +d.grades[g]; if (isFinite(v)&&v>0 && grader) Collection.recordPrice(card.key, 'ebay', grader, g, v); });
+    });
+    localStorage.setItem('dbz.priceMemoryMigrated', '1');
+  }
+} catch (e) {}
 
 renderGradeInputs();
 if ($('#helper-url')) $('#helper-url').value = helperUrl();
