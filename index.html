@@ -19,6 +19,10 @@
       </div>
       <div class="dbz-title">Scouter On</div>
       <div class="dbz-sub" id="dbz-sub">Powering up…</div>
+      <div class="dbz-bar-wrap hidden" id="dbz-bar-wrap">
+        <div class="dbz-bar" id="dbz-bar"></div>
+      </div>
+      <div class="dbz-note hidden" id="dbz-note"></div>
     </div>
 
     <!-- top bar -->
@@ -60,6 +64,14 @@
         <p class="hint">OCR isn't perfect — fix anything it misread before looking up prices.</p>
         <button class="btn-primary block" data-action="to-calc">Continue → Prices &amp; Flip</button>
       </div>
+
+      <div class="card-block">
+        <div class="sr-title">Auto-pull setup (optional)</div>
+        <p class="hint" style="margin-top:0">For free auto-prices: run the DBZ Mac Helper on your MacBook + Chrome extension (auto-mode), phone on same Wi-Fi. Enter the address the helper prints.</p>
+        <label class="field"><span>Mac helper address</span><input type="text" id="helper-url" placeholder="http://192.168.x.x:4747" /></label>
+        <button class="btn-secondary block" data-action="save-helper">Save &amp; test connection</button>
+        <p class="hint" id="helper-status"></p>
+      </div>
     </section>
 
     <!-- ============ CALC ============ -->
@@ -75,6 +87,10 @@
 
       <div class="card-block">
         <div class="sr-title">Prices you found</div>
+        <p class="mem-note hidden" id="mem-note"></p>
+        <div class="auto-pull-row">
+          <button class="btn-secondary" data-action="auto-pull">🖥️ Auto-pull from my Mac</button>
+        </div>
         <label class="field"><span>Raw price (what you'd pay) $</span><input type="number" id="p-raw" inputmode="decimal" step="0.01" placeholder="0.00" /></label>
         <label class="field"><span>Grader</span>
           <select id="grader-select">
@@ -99,6 +115,7 @@
         <div id="flip-rows"></div>
         <div id="best-flip" class="best-flip"></div>
         <button class="btn-secondary block" data-action="save-card">Save this card</button>
+        <button class="btn-primary block" data-action="track-card">📈 Track in Collection</button>
       </div>
     </section>
 
@@ -107,6 +124,74 @@
       <div class="card-block">
         <ul class="saved-list" id="saved-list"></ul>
         <div id="saved-empty" class="empty"><p>No saved cards yet. Scan one and save the flip.</p></div>
+      </div>
+    </section>
+
+    <!-- ============ COLLECTION / PORTFOLIO ============ -->
+    <section id="pane-collection" class="pane">
+      <div class="card-block">
+        <div class="col-hero">
+          <div class="col-hero-label">COLLECTION VALUE</div>
+          <div class="col-hero-value" id="col-value">$0.00</div>
+          <div class="col-hero-sub" id="col-value-sub">0 cards · source: eBay</div>
+        </div>
+        <div class="col-perf-row" id="col-perf"></div>
+      </div>
+      <div class="card-block">
+        <div class="col-chart-head">
+          <div class="sr-title" style="margin:0">Value over time</div>
+          <div class="col-range" id="col-range">
+            <button class="range-btn" data-range="7">1W</button>
+            <button class="range-btn" data-range="30">1M</button>
+            <button class="range-btn" data-range="90">3M</button>
+            <button class="range-btn" data-range="180">6M</button>
+            <button class="range-btn" data-range="ytd">YTD</button>
+            <button class="range-btn" data-range="365">1Y</button>
+            <button class="range-btn active" data-range="all">All</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="col-chart" height="180"></canvas></div>
+        <div id="col-chart-readout" class="col-readout"></div>
+      </div>
+      <div class="card-block">
+        <div class="sr-title">Holdings</div>
+        <ul class="holdings-list" id="holdings-list"></ul>
+        <div id="holdings-empty" class="empty"><p>No cards in your collection yet. Scan or search a card, then "Add to Collection."</p></div>
+      </div>
+      <div class="card-block">
+        <div class="learn-row">
+          <button class="btn-secondary" data-action="col-export">⬇ Export collection</button>
+          <label class="btn-secondary import-lbl">⬆ Import<input type="file" id="col-import" accept="application/json" hidden /></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CARD DETAIL ============ -->
+    <section id="pane-carddetail" class="pane">
+      <div class="card-block">
+        <button class="btn-secondary" data-action="cd-back">← Back</button>
+        <div class="cd-head">
+          <div class="cd-name" id="cd-name">—</div>
+          <div class="cd-meta" id="cd-meta"></div>
+        </div>
+      </div>
+      <div class="card-block">
+        <div class="sr-title">Raw market price</div>
+        <table class="price-table" id="cd-raw-table"></table>
+      </div>
+      <div class="card-block">
+        <div class="sr-title">Graded comparison (kept separate per company)</div>
+        <div class="table-scroll"><table class="price-table graded" id="cd-graded-table"></table></div>
+        <p class="hint">N/A = no reliable price recorded. PSA / BGS / CGC are never mixed.</p>
+      </div>
+      <div class="card-block">
+        <div class="col-chart-head"><div class="sr-title" style="margin:0">This card's price history</div></div>
+        <div class="chart-wrap"><canvas id="cd-chart" height="160"></canvas></div>
+        <div id="cd-chart-readout" class="col-readout"></div>
+      </div>
+      <div class="card-block">
+        <button class="btn-primary block" data-action="cd-add">+ ADD TO COLLECTION</button>
+        <button class="btn-secondary block" data-action="cd-refresh">↻ Refresh prices (via Mac)</button>
       </div>
     </section>
 
@@ -133,10 +218,162 @@
       </div>
     </section>
 
+    <!-- Business inventory (Phase 1) -->
+    <section id="pane-inventory" class="pane">
+      <div class="card-block">
+        <div class="sr-title">Business Dashboard</div>
+        <div class="biz-hero">
+          <div class="biz-hero-label">Total Inventory Value (cost basis)</div>
+          <div class="biz-hero-val" id="dash-total">$0.00</div>
+          <div class="biz-hero-sub" id="dash-sub">—</div>
+        </div>
+        <div class="dash-grid" id="dash-grid"></div>
+        <button class="btn-secondary block" data-action="dash-refresh-all" style="margin-top:10px">↻ Refresh all held cards' prices</button>
+        <p class="hint" id="dash-refresh-note" style="margin-top:4px"></p>
+      </div>
+      <div class="card-block">
+        <div class="sr-title">TCG Inventory</div>
+        <div class="inv-filter-row">
+          <select id="inv-status-filter" class="inv-select">
+            <option value="all">All statuses</option>
+          </select>
+          <input type="search" id="inv-search" class="inv-search" placeholder="Search card name…" />
+        </div>
+        <div id="inv-summary" class="inv-summary"></div>
+      </div>
+      <div class="card-block">
+        <div class="sr-title">Export to Profit Track</div>
+        <p class="hint" style="margin-top:0">Sends card purchases, grading costs, sales &amp; fees to Profit Track. Each transaction has a unique ID — re-exporting never double-counts. Paste into Profit Track → Import DBZ Data.</p>
+        <div id="export-summary" class="inv-summary"></div>
+        <button class="btn-primary block" data-action="bridge-copy">📋 Copy Data for Profit Track</button>
+        <textarea id="bridge-json" class="bridge-json" readonly placeholder="Tap Copy Data — the export appears here too."></textarea>
+        <div id="bridge-status" class="auto-status"></div>
+      <div class="card-block">
+        <div id="inv-list" class="inv-list"></div>
+      </div>
+
+      <!-- Sealed products (Phase 3) -->
+      <div class="card-block">
+        <div class="sr-title">Sealed Products</div>
+        <button class="btn-secondary block" data-action="prod-add-open">+ Buy Sealed Product</button>
+        <div id="prod-add-form" class="prod-form hidden">
+          <label class="field"><span>Product name</span><input type="text" id="pf-name" placeholder="FB08 Booster Box"></label>
+          <div class="cost-row">
+            <label class="field"><span>Set</span><input type="text" id="pf-set" placeholder="FB08"></label>
+            <label class="field"><span>Type</span><select id="pf-type" class="inv-select"></select></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Quantity</span><input type="number" id="pf-qty" inputmode="numeric" step="1" placeholder="1"></label>
+            <label class="field"><span>Total price</span><input type="number" id="pf-price" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Shipping</span><input type="number" id="pf-ship" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Tax</span><input type="number" id="pf-tax" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <div id="pf-perunit" class="inv-ed-basis"></div>
+          <button class="btn-primary block" data-action="prod-save">Add Product</button>
+        </div>
+        <div id="prod-list" class="inv-list" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- Grading workflow (Phase 4) -->
+    <div id="grade-editor" class="inv-editor-overlay hidden">
+      <div class="inv-editor-sheet">
+        <div class="inv-editor-head">
+          <div class="inv-editor-title" id="grade-ed-title">Send to Grading</div>
+          <button class="inv-ed-close" data-action="grade-ed-close" aria-label="Close">✕</button>
+        </div>
+        <div class="inv-editor-body">
+          <div id="grade-send-fields">
+            <label class="field"><span>Grading company</span>
+              <select id="gr-company" class="inv-select"><option>PSA</option><option>BGS</option><option>CGC</option><option>SGC</option></select>
+            </label>
+            <div class="cost-row">
+              <label class="field"><span>Submission #</span><input type="text" id="gr-subno" placeholder="optional"></label>
+              <label class="field"><span>Submitted date</span><input type="date" id="gr-subdate"></label>
+            </div>
+            <div class="cost-row">
+              <label class="field"><span>Grading fee</span><input type="number" id="gr-fee" inputmode="decimal" step="0.01" placeholder="0"></label>
+              <label class="field"><span>Ship to grader</span><input type="number" id="gr-shipto" inputmode="decimal" step="0.01" placeholder="0"></label>
+            </div>
+            <div class="cost-row">
+              <label class="field"><span>Return shipping</span><input type="number" id="gr-shipback" inputmode="decimal" step="0.01" placeholder="0"></label>
+              <label class="field"><span>Insurance</span><input type="number" id="gr-ins" inputmode="decimal" step="0.01" placeholder="0"></label>
+            </div>
+            <label class="field"><span>Other costs</span><input type="number" id="gr-other" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <div id="grade-complete-fields" class="hidden">
+            <label class="field"><span>Final grade</span><input type="text" id="gr-grade" inputmode="decimal" placeholder="e.g. 10 or 9.5"></label>
+            <label class="field"><span>Date returned</span><input type="date" id="gr-retdate"></label>
+            <div class="cost-row">
+              <label class="field"><span>Extra return ship</span><input type="number" id="gr-extraship" inputmode="decimal" step="0.01" placeholder="0"></label>
+              <label class="field"><span>Extra other</span><input type="number" id="gr-extraother" inputmode="decimal" step="0.01" placeholder="0"></label>
+            </div>
+          </div>
+          <div id="grade-basis" class="inv-ed-basis"></div>
+        </div>
+        <div class="inv-editor-foot">
+          <button class="btn-primary block" data-action="grade-ed-save" id="grade-save-btn">Send to Grading</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inventory item editor (Phase 1) -->
+    <div id="inv-editor" class="inv-editor-overlay hidden">
+      <div class="inv-editor-sheet">
+        <div class="inv-editor-head">
+          <div class="inv-editor-title" id="inv-ed-title">Edit item</div>
+          <button class="inv-ed-close" data-action="inv-ed-close" aria-label="Close">✕</button>
+        </div>
+        <div class="inv-editor-body">
+          <div class="inv-ed-group-title">Acquisition costs</div>
+          <div class="cost-row">
+            <label class="field"><span>Purchase price</span><input type="number" id="ed-acq-price" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Shipping</span><input type="number" id="ed-acq-ship" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Tax</span><input type="number" id="ed-acq-tax" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Other</span><input type="number" id="ed-acq-other" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <label class="field"><span>Purchase date</span><input type="date" id="ed-acq-date"></label>
+
+          <div class="inv-ed-group-title">Grading costs (optional)</div>
+          <div class="cost-row">
+            <label class="field"><span>Grading fee</span><input type="number" id="ed-grd-fee" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Ship to grader</span><input type="number" id="ed-grd-shipto" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Return shipping</span><input type="number" id="ed-grd-shipback" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Insurance/other</span><input type="number" id="ed-grd-other" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+
+          <div class="inv-ed-group-title">Status</div>
+          <select id="ed-status" class="inv-select"></select>
+
+          <label class="field"><span>Listing price (optional)</span><input type="number" id="ed-list-price" inputmode="decimal" step="0.01" placeholder="0"></label>
+
+          <div class="inv-ed-group-title">Sale (fill when sold)</div>
+          <div class="cost-row">
+            <label class="field"><span>Sale price</span><input type="number" id="ed-sale-price" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Selling fees</span><input type="number" id="ed-sale-fees" inputmode="decimal" step="0.01" placeholder="auto"></label>
+          </div>
+          <label class="field"><span>Sale date</span><input type="date" id="ed-sale-date"></label>
+
+          <div id="inv-ed-basis" class="inv-ed-basis"></div>
+        </div>
+        <div class="inv-editor-foot">
+          <button class="btn-primary block" data-action="inv-ed-save">Save</button>
+        </div>
+      </div>
+    </div>
+
     <!-- nav -->
     <nav class="tabbar">
       <button class="tab active" data-view="scan"><span class="tico">📷</span><span>Scan</span></button>
       <button class="tab" data-view="calc"><span class="tico">🧮</span><span>Flip</span></button>
+      <button class="tab" data-view="collection"><span class="tico">📈</span><span>Collection</span></button>
+      <button class="tab" data-view="inventory"><span class="tico">📦</span><span>Business</span></button>
       <button class="tab" data-view="top"><span class="tico">🏆</span><span>Top 10</span></button>
       <button class="tab" data-view="saved"><span class="tico">⭐</span><span>Saved</span></button>
     </nav>
@@ -144,6 +381,11 @@
 
   <!-- Tesseract.js for on-device OCR (no API, no backend). Cached by SW after first load. -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="cloud.js"></script>
+  <script src="collection.js"></script>
+  <script src="inventory.js"></script>
+  <script src="bridge-export.js"></script>
+  <script src="products.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) window.addEventListener('load', () => {
