@@ -63,6 +63,10 @@ const Products = (() => {
   function openUnit(productId, unitLabel){
     const l=products(); const p=l.find(x=>x.id===productId);
     if(!p || p.qty<=0) return null;
+    // Guard: if a previously-opened unit for this product is still EMPTY (no pulls yet),
+    // reuse it instead of opening another — prevents accidental double-opens inflating cost.
+    const existingEmpty = sessions().find(s => s.productId===productId && (s.cardItemIds||[]).length===0);
+    if (existingEmpty) return existingEmpty;
     p.qty -= 1; p.opened += 1;
     if(p.qty<=0) p.status='opened'; else p.status='partially opened';
     save(K_PROD, l);
@@ -115,7 +119,7 @@ const Products = (() => {
     // Opened cost = cost of the units actually opened. Base it on the number of SESSIONS
     // (one session == one opened unit), which is self-correcting, rather than the p.opened
     // counter which can drift (double-tap, interrupted open) and double the allocation.
-    const openedUnits = sessionsForProduct(productId).length || p.opened || 0;
+    const openedUnits = openedUnitsFor(p);
     const openedCost = r2(openedUnits * p.costPerUnit);
     const its = itemsForProduct(productId);
     let keeperSales = 0, unsoldKeepers = 0;
@@ -129,24 +133,42 @@ const Products = (() => {
     return { openedCost, openedUnits, keeperSales:r2(keeperSales), bulk:r2(bulk), recovered, remaining, unsoldKeepers };
   }
 
-  // Cost basis for ONE unsold keeper = remaining box cost ÷ number of unsold keepers.
-  // (Sold keepers already recovered their share; they don't carry basis.)
+  // Cost basis for ONE pulled card, allocated PER PACK (per session):
+  // each card carries (that pack's cost) ÷ (number of unsold cards pulled from THAT pack),
+  // reduced by any bulk sales tagged to that pack. Opening packs one at a time keeps each
+  // pack's cost with its own pulls — costs are never pooled across packs.
   function allocatedCostForItem(cardItemId){
-    const s = sessions().find(x => x.cardItemIds.includes(cardItemId));
+    const s = sessions().find(x => (x.cardItemIds||[]).includes(cardItemId));
     if (!s) return 0;
-    const rec = boxRecovery(s.productId); if (!rec) return 0;
-    // if this specific card is already sold, it carries no remaining allocation
+    const p = getProduct(s.productId); if (!p) return 0;
     const items = (window.Collection && window.Collection.items) ? window.Collection.items() : [];
     const me = items.find(x => x.id === cardItemId);
-    // A sold keeper carries the box cost it had locked in at sale time (not 0).
+    // A sold card carries the pack cost it locked in at sale time.
     if (me && me.status === 'sold') return n(me.allocLocked) || 0;
-    if (rec.unsoldKeepers <= 0) return 0;
-    return r2(rec.remaining / rec.unsoldKeepers);
+    // This pack's cost, reduced by sales already recovered FROM THIS PACK.
+    const packCost = r2(p.costPerUnit || 0);
+    const pulls = (s.cardItemIds||[]).map(id => items.find(x=>x.id===id)).filter(Boolean);
+    let recovered = 0, unsold = 0;
+    pulls.forEach(it => {
+      if (it.status === 'sold' && it.sale) recovered += n(it.sale.price) * (it.qty||1);
+      else unsold += (it.qty||1);
+    });
+    recovered += packBulkTotal(s.id);
+    const remaining = Math.max(0, packCost - recovered);
+    if (unsold <= 0) return 0;
+    return r2(remaining / unsold);
   }
-  // Sessions == opened units (authoritative). Falls back to p.opened only if no sessions exist.
+  // Bulk sales tagged to a specific pack/session (see addBulkSale sessionId param).
+  function packBulkTotal(sessionId){
+    let t = 0;
+    products().forEach(p => (p.bulkSales||[]).forEach(b => { if (b.sessionId === sessionId) t += n(b.amount); }));
+    return t;
+  }
+  // Sessions WITH pulls == opened units that actually cost something. An empty session
+  // (0 pulls — usually an accidental double-open) must NOT inflate the allocation.
   function openedUnitsFor(p){
-    const n = sessionsForProduct(p.id).length;
-    return n || p.opened || 0;
+    const withPulls = sessionsForProduct(p.id).filter(s => (s.cardItemIds||[]).length > 0).length;
+    return withPulls || sessionsForProduct(p.id).length || p.opened || 0;
   }
 
   // Which session/product a card came from (traceability helper for UI).
@@ -214,19 +236,8 @@ const Products = (() => {
     });
   }
 
-  // Self-heal: sync each product's `opened` counter to the real number of sessions.
-  // Fixes historical drift (double-tap opens, interrupted opens) that inflated allocation.
-  function healOpenedCounts(){
-    const l = products(); let changed = false;
-    l.forEach(p => {
-      const real = sessions().filter(s=>s.productId===p.id).length;
-      if (real > 0 && p.opened !== real) { p.opened = real; changed = true; }
-      // keep unitsTotal consistent so cost-per-unit stays right
-      if (p.unitsTotal !== (p.qty + p.opened)) { /* leave qty as-is; unitsTotal is historical */ }
-    });
-    if (changed) save(K_PROD, l);
-  }
-  try { healOpenedCounts(); } catch(e){}
+  // (No auto-mutation of sessions/opened counts — opening packs one at a time and
+  //  leaving a just-opened pack with no pulls yet is a legitimate state.)
 
   return {
     TYPES, products, sessions, getProduct, getSession, totalCost,
