@@ -42,10 +42,12 @@ const Inventory = (() => {
     if (!item) return 0;
     const a = item.acq || {};
     const g = item.grading || {};
-    const acq = n(a.price) + n(a.shipping) + n(a.tax) + n(a.other);
     const grd = n(g.fee) + n(g.shipTo) + n(g.shipBack) + n(g.insurance) + n(g.other);
-    // If this card was pulled from a sealed product, add its allocated share of the box/blister cost.
+    // If this card was pulled from a sealed product, its cost is the allocated box/blister share ONLY.
+    // Any stored acq.price on a pull is stale (older versions seeded it) and would double-count the box cost.
     const alloc = (item.id && window.Products && window.Products.allocatedCostForItem) ? window.Products.allocatedCostForItem(item.id) : 0;
+    const isPull = !!(item.sourceSessionId) || (window.Products && window.Products.sourceOfItem && window.Products.sourceOfItem(item.id));
+    const acq = isPull ? 0 : (n(a.price) + n(a.shipping) + n(a.tax) + n(a.other));
     return round2(acq + grd + alloc);
   }
   // Total basis across all copies: acquisition is per-unit (×qty), grading + allocated pull cost per-item (×1).
@@ -54,9 +56,10 @@ const Inventory = (() => {
     const a = item.acq || {};
     const g = item.grading || {};
     const qty = item.qty || 1;
-    const acq = (n(a.price) + n(a.shipping) + n(a.tax) + n(a.other)) * qty;
     const grd = n(g.fee) + n(g.shipTo) + n(g.shipBack) + n(g.insurance) + n(g.other);
     const alloc = (item.id && window.Products && window.Products.allocatedCostForItem) ? window.Products.allocatedCostForItem(item.id) : 0;
+    const isPull = !!(item.sourceSessionId) || (window.Products && window.Products.sourceOfItem && window.Products.sourceOfItem(item.id));
+    const acq = isPull ? 0 : (n(a.price) + n(a.shipping) + n(a.tax) + n(a.other)) * qty;
     return round2(acq + grd + alloc);
   }
   // ACCOUNTING basis (for P&L/snapshot): acquisition×qty + grading. EXCLUDES allocated pull cost,

@@ -1194,9 +1194,25 @@ function renderProducts(){
   const listEl = $('#prod-list');
   if (!listEl || !window.Products) return;
   const prods = Products.products();
-  if (!prods.length) { listEl.innerHTML = `<p class="hint">No sealed products yet. Tap "+ Buy Sealed Product" to add boxes, packs, blisters, etc.</p>`; return; }
+  // --- TEMP DIAGNOSTIC (v53) — remove after confirming ---
+  let diag = `<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px;margin-bottom:8px;font-size:11px;color:#8b949e">`+
+    `<b style="color:#58a6ff">Running ${window.APP_VERSION||'?'}</b>`;
+  prods.forEach(p=>{
+    if ((p.opened||0)>0 || Products.sessionsForProduct(p.id).length>0){
+      const sc = Products.sessionsForProduct(p.id).length;
+      const rec = Products.boxRecovery(p.id);
+      diag += `<div>📦 ${escapeHtmlSafe(p.name)}: opened=${p.opened} · sessions=${sc} · perUnit=$${p.costPerUnit} · openedCost=$${rec?rec.openedCost:'?'} · unsoldKeepers=${rec?rec.unsoldKeepers:'?'} · <b>each=$${rec&&rec.unsoldKeepers?Math.round(rec.remaining/rec.unsoldKeepers*100)/100:'?'}</b></div>`;
+      // per-card link + basis
+      (Products.itemsForProduct?Products.itemsForProduct(p.id):[]).forEach(it=>{
+        const linked = !!(it.sourceSessionId) || !!(Products.sourceOfItem&&Products.sourceOfItem(it.id));
+        diag += `<div style="padding-left:12px">↳ ${escapeHtmlSafe(invItemName(it))}: ${linked?'<span style="color:#3fb950">LINKED</span>':'<span style="color:#ff5a4d">NOT LINKED</span>'} · acq=$${(it.acq&&it.acq.price)||0} · <b>basis=$${Inventory.costBasis(it)}</b></div>`;
+      });
+    }
+  });
+  diag += `</div>`;
+  if (!prods.length) { listEl.innerHTML = diag + `<p class="hint">No sealed products yet. Tap "+ Buy Sealed Product" to add boxes, packs, blisters, etc.</p>`; return; }
 
-  listEl.innerHTML = prods.map(p => {
+  listEl.innerHTML = diag + prods.map(p => {
     const pr = Products.productProfit(p.id);
     const canOpen = p.qty > 0;
     let profitLine = '';
