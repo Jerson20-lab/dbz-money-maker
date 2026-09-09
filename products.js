@@ -112,7 +112,11 @@ const Products = (() => {
   // Box recovery snapshot: opened cost, recovered so far, remaining, unsold keeper count.
   function boxRecovery(productId){
     const p = getProduct(productId); if(!p) return null;
-    const openedCost = r2(p.opened * p.costPerUnit);
+    // Opened cost = cost of the units actually opened. Base it on the number of SESSIONS
+    // (one session == one opened unit), which is self-correcting, rather than the p.opened
+    // counter which can drift (double-tap, interrupted open) and double the allocation.
+    const openedUnits = sessionsForProduct(productId).length || p.opened || 0;
+    const openedCost = r2(openedUnits * p.costPerUnit);
     const its = itemsForProduct(productId);
     let keeperSales = 0, unsoldKeepers = 0;
     its.forEach(it => {
@@ -122,7 +126,7 @@ const Products = (() => {
     const bulk = bulkSalesTotal(p);
     const recovered = r2(keeperSales + bulk);
     const remaining = r2(Math.max(0, openedCost - recovered));  // don't go negative
-    return { openedCost, keeperSales:r2(keeperSales), bulk:r2(bulk), recovered, remaining, unsoldKeepers };
+    return { openedCost, openedUnits, keeperSales:r2(keeperSales), bulk:r2(bulk), recovered, remaining, unsoldKeepers };
   }
 
   // Cost basis for ONE unsold keeper = remaining box cost ÷ number of unsold keepers.
@@ -139,6 +143,12 @@ const Products = (() => {
     if (rec.unsoldKeepers <= 0) return 0;
     return r2(rec.remaining / rec.unsoldKeepers);
   }
+  // Sessions == opened units (authoritative). Falls back to p.opened only if no sessions exist.
+  function openedUnitsFor(p){
+    const n = sessionsForProduct(p.id).length;
+    return n || p.opened || 0;
+  }
+
   // Which session/product a card came from (traceability helper for UI).
   function sourceOfItem(cardItemId){
     const s = sessions().find(x => x.cardItemIds.includes(cardItemId));
@@ -170,13 +180,14 @@ const Products = (() => {
     }));
 
     // cost of the opened portion (allocated): opened units * costPerUnit
-    const openedCost = r2(p.opened * p.costPerUnit);
+    const openedUnits = openedUnitsFor(p);
+    const openedCost = r2(openedUnits * p.costPerUnit);
     const totalRecovered = r2(soldRevenue + remainingValue);
     const realizedProfit = r2(soldRevenue - openedCost);          // realized so far vs opened cost
     const projectedProfit = r2(totalRecovered - openedCost);      // if remaining sells at est value
     const roi = openedCost>0 ? r2(projectedProfit/openedCost*100) : null;
     return {
-      product:p, openedUnits:p.opened, sealedUnits:p.qty, costPerUnit:p.costPerUnit,
+      product:p, openedUnits, sealedUnits:p.qty, costPerUnit:p.costPerUnit,
       openedCost, pulls, estPullValue:r2(estValue),
       soldRevenue:r2(soldRevenue), soldCount, remainingValue:r2(remainingValue),
       totalRecovered, realizedProfit, projectedProfit, roi
@@ -190,8 +201,9 @@ const Products = (() => {
       const key = (p.set||'(no set)');
       const pr = productProfit(p.id);
       const b = bySet[key] = bySet[key] || { set:key, boxesOpened:0, spent:0, pullValue:0, sold:0, remaining:0 };
-      b.boxesOpened += p.opened;
-      b.spent += r2(p.opened*p.costPerUnit);
+      const ou = openedUnitsFor(p);
+      b.boxesOpened += ou;
+      b.spent += r2(ou*p.costPerUnit);
       if (pr){ b.pullValue += pr.estPullValue + pr.soldRevenue; b.sold += pr.soldRevenue; b.remaining += pr.remainingValue; }
     });
     return Object.values(bySet).map(b => {
@@ -202,12 +214,26 @@ const Products = (() => {
     });
   }
 
+  // Self-heal: sync each product's `opened` counter to the real number of sessions.
+  // Fixes historical drift (double-tap opens, interrupted opens) that inflated allocation.
+  function healOpenedCounts(){
+    const l = products(); let changed = false;
+    l.forEach(p => {
+      const real = sessions().filter(s=>s.productId===p.id).length;
+      if (real > 0 && p.opened !== real) { p.opened = real; changed = true; }
+      // keep unitsTotal consistent so cost-per-unit stays right
+      if (p.unitsTotal !== (p.qty + p.opened)) { /* leave qty as-is; unitsTotal is historical */ }
+    });
+    if (changed) save(K_PROD, l);
+  }
+  try { healOpenedCounts(); } catch(e){}
+
   return {
     TYPES, products, sessions, getProduct, getSession, totalCost,
     addProduct, updateProduct, removeProduct,
     openUnit, addPullToSession, removePullFromSession, sessionsForProduct,
     allocatedCostForItem, sourceOfItem,
-    addBulkSale, removeBulkSale, bulkSalesTotal, boxRecovery, itemsForProduct,
+    addBulkSale, removeBulkSale, bulkSalesTotal, boxRecovery, itemsForProduct, openedUnitsFor,
     productProfit, profitBySet, today
   };
 })();

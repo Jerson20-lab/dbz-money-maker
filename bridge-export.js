@@ -192,7 +192,7 @@ const BridgeExport = (() => {
       sealedValue += (p.qty||0)*(p.costPerUnit||0);
       sealedCount += (p.qty||0);
       productSpend += (window.Products.totalCost?window.Products.totalCost(p.cost):0);
-      openSpend += (p.opened||0)*(p.costPerUnit||0);
+      openSpend += ((window.Products.openedUnitsFor?window.Products.openedUnitsFor(p):(p.opened||0)))*(p.costPerUnit||0);
     });
     const invested = cardBasis + sealedValue;              // conservative money currently in inventory
     return {
