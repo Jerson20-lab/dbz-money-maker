@@ -256,6 +256,11 @@
           </div>
           <div class="cost-row">
             <label class="field"><span>Purchase price</span><input type="number" id="af-price" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Price is</span>
+              <select id="af-price-mode" class="inv-select"><option value="each">Per card (each)</option><option value="total">Total (all copies)</option></select>
+            </label>
+          </div>
+          <div class="cost-row">
             <label class="field"><span>Shipping</span><input type="number" id="af-ship" inputmode="decimal" step="0.01" placeholder="0"></label>
           </div>
           <div class="cost-row">
@@ -455,7 +460,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v35';
+    window.APP_VERSION = 'v37';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

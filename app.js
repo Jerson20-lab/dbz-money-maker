@@ -490,6 +490,18 @@ function importLearning(file) {
   reader.readAsText(file);
 }
 
+// Friendly "last updated" for Top 10 prices. Honest: seed prices were never verified.
+function fmtUpdated(iso){
+  if (!iso) return 'never (starting estimate — verify on eBay)';
+  const then = new Date(iso).getTime(); if (!isFinite(then)) return 'unknown';
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins/60); if (hrs < 24) return `${hrs} hr${hrs===1?'':'s'} ago`;
+  const days = Math.floor(hrs/24); if (days < 30) return `${days} day${days===1?'':'s'} ago`;
+  return new Date(iso).toISOString().slice(0,10);
+}
+
 function rankTop() {
   const min = num('#filt-min') || 0;
   const max = num('#filt-max') || Infinity;
@@ -519,6 +531,7 @@ function rankTop() {
           <span>Raw ~${money(c.raw)}</span><span>Grade10 ~${money(c.top)}</span>
           <span class="${c.profit >= 0 ? 'pos' : 'neg'}">Profit ${money(c.profit)} (${pct(c.margin)})</span>
         </div>
+        <div class="ti-updated">Prices updated: ${fmtUpdated(c.lastUpdated)}</div>
         <div class="ti-why">
           <div class="ti-why-lbl">WHY THIS FLIP</div>
           <div class="ti-calc">Grade10 ${money(c.top)} − Raw ${money(c.raw)} − Grade $34.95 − Ship $15 = <b class="${c.profit >= 0 ? 'pos' : 'neg'}">${money(c.profit)}</b></div>
@@ -567,6 +580,7 @@ function editWatch(code) {
   if (top === null) return;
   c.raw = parseFloat(raw) || c.raw;
   c.top = parseFloat(top) || c.top;
+  c.lastUpdated = new Date().toISOString();
   saveWatchlist(w);
   rankTop();
 }
@@ -858,28 +872,49 @@ function updateAddCardGradeRow(){
   const row = $('#af-grade-row'); if (row) row.style.display = graded ? '' : 'none';
 }
 function afNum(id){ const v=parseFloat($(id).value); return isFinite(v)?v:0; }
+// Convert entered per-card OR total amounts into PER-UNIT values (stored internally per-unit).
+// If mode==='total', the entered figures cover all copies, so divide by qty.
+function afPerUnit(){
+  const qty = Math.max(1, parseInt($('#af-qty').value,10)||1);
+  const mode = ($('#af-price-mode') && $('#af-price-mode').value) || 'each';
+  const div = mode === 'total' ? qty : 1;
+  return {
+    qty,
+    price: afNum('#af-price')/div,
+    shipping: afNum('#af-ship')/div,
+    tax: afNum('#af-tax')/div,
+    other: afNum('#af-other')/div
+  };
+}
 function updateAddCardBasis(){
-  const probe = { acq:{price:afNum('#af-price'), shipping:afNum('#af-ship'), tax:afNum('#af-tax'), other:afNum('#af-other')}, grading:{} };
-  const basis = Inventory.costBasis(probe);
-  const be = Inventory.breakEven(probe);
+  const u = afPerUnit();
+  // probe with qty so the preview shows the REAL total (matches what gets saved)
+  const probe = { id:null, qty:u.qty, acq:{price:u.price, shipping:u.shipping, tax:u.tax, other:u.other}, grading:{} };
+  const totalBasis = Inventory.costBasisTotal(probe);   // × qty — the true total
+  const perUnitBasis = Inventory.costBasis(probe);       // one copy
+  const be = Inventory.breakEven(probe);                 // break-even per card
   const el = $('#af-basis');
-  if (el) el.innerHTML = `<div class="inv-sum-row"><span>Cost basis</span><b>${money(basis)}</b></div>`+
-                         `<div class="inv-sum-row"><span>Break-even (after fees)</span><b>${money(be)}</b></div>`;
+  if (el) el.innerHTML =
+    `<div class="inv-sum-row"><span>Total cost (${u.qty} card${u.qty===1?'':'s'})</span><b>${money(totalBasis)}</b></div>`+
+    `<div class="inv-sum-row"><span>Per card</span><b>${money(perUnitBasis)}</b></div>`+
+    `<div class="inv-sum-row"><span>Break-even each (after fees)</span><b>${money(be)}</b></div>`;
 }
 function saveAddCard(){
   const name = $('#af-name').value.trim();
   if (!name) { alert('Enter a card name.'); return; }
   const cond = $('#af-cond').value;
+  const u = afPerUnit();
   const card = Collection.upsertCard({ name, number:$('#af-number').value.trim(), set:$('#af-set').value.trim(), variant:'', language:'EN' });
   const it = Collection.addItem(card.key, {
     condition: cond,
     company: cond==='graded' ? $('#af-company').value : null,
     grade: cond==='graded' ? ($('#af-grade').value.trim()||null) : null,
-    qty: parseInt($('#af-qty').value,10)||1,
+    qty: u.qty,
     valSource: 'ebay'
   });
   Collection.updateItem(it.id, {
-    acq: { price:afNum('#af-price'), shipping:afNum('#af-ship'), tax:afNum('#af-tax'), other:afNum('#af-other'), date:$('#af-date').value||Collection.today() },
+    // stored PER-UNIT (costBasisTotal multiplies by qty); toggle already normalized above
+    acq: { price:Inventory.round2(u.price), shipping:Inventory.round2(u.shipping), tax:Inventory.round2(u.tax), other:Inventory.round2(u.other), date:$('#af-date').value||Collection.today() },
     status: 'in_inventory'
   });
   // reset + hide
@@ -1384,7 +1419,8 @@ if ($('#inv-search')) $('#inv-search').addEventListener('input', e => { invSearc
 ['#gr-fee','#gr-shipto','#gr-shipback','#gr-ins','#gr-other','#gr-extraship','#gr-extraother'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateGradeBasis); });
 // add-card form: condition toggle + live basis
 if ($('#af-cond')) $('#af-cond').addEventListener('change', updateAddCardGradeRow);
-['#af-price','#af-ship','#af-tax','#af-other'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateAddCardBasis); });
+['#af-price','#af-ship','#af-tax','#af-other','#af-qty'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateAddCardBasis); });
+if ($('#af-price-mode')) $('#af-price-mode').addEventListener('change', updateAddCardBasis);
 $('#photo-input').addEventListener('change', e => { if (e.target.files[0]) ocrFromFile(e.target.files[0]); e.target.value = ''; });
 $('#import-learn').addEventListener('change', e => { if (e.target.files[0]) importLearning(e.target.files[0]); e.target.value = ''; });
 $('#col-import').addEventListener('change', e => { if (e.target.files[0]) importCollection(e.target.files[0]); e.target.value = ''; });

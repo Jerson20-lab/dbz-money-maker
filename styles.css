@@ -247,3 +247,6 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 .dash-cell{background:#1c0808;border:1px solid rgba(255,90,70,.14);border-radius:10px;padding:9px 11px;}
 .dash-c-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;}
 .dash-c-val{font-size:16px;font-weight:700;margin-top:2px;}
+
+/* Top 10 last-updated line */
+.ti-updated{font-size:10px;color:var(--muted);margin-top:4px;font-style:italic;}
