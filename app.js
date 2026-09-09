@@ -322,41 +322,31 @@ function setHelperUrl(u) { localStorage.setItem('dbz.helperUrl', (u||'').trim().
 async function autoPullPrices() {
   if (!window.Cloud || !Cloud.configured()) { ocrStatusCalc('Cloud not set up. Paste your Firebase URL in cloud.js.'); return; }
   const grader = GRADERS[$('#grader-select').value].name.split(' ')[0];
-  showLoader('Requesting prices from the cloud…');
-  showProgress('This can take a minute or two — Chrome is searching eBay separately for each grade (raw, PSA, BGS, CGC) so nothing gets mixed. Keep Chrome open with the extension on.');
   try {
-    // 1) queue the card in the cloud (extension pulls raw + all graders/grades, 3-pass)
+    // 1) request a price update (extension fulfills it next time you open it in Chrome)
     await Cloud.enqueue(state.scan.name, state.scan.code, {});
-    // 2) poll the cloud for results — key is name|code (grader-independent)
+    // 2) read whatever's already in the cloud right now (no long polling / no blocking loader)
     const key = Cloud.keyFor(state.scan.name, state.scan.code);
-    let got = null;
-    for (let i = 0; i < 60; i++) {           // 3-pass multi-grade pull can take a while
-      setProgress((i / 60) * 100);
-      showLoader(`Waiting for Chrome to fetch prices… (${(i*2)|0}s)`);
-      await new Promise(r => setTimeout(r, 2000));
-      try { const p = await Cloud.getPrice(key); if (p && p.ebay) { got = p; setProgress(100); break; } } catch (e) {}
-    }
-    if (!got || !got.ebay) { ocrStatusCalc('No prices yet. Open Chrome with the extension (auto-mode on) to fetch them, then try again.'); return; }
-    const eb = got.ebay;
+    let got = null; try { got = await Cloud.getPrice(key); } catch (e) {}
     const val = s => (s && s.trimmedAvg != null) ? s.trimmedAvg : null;
-    // 3) fill raw + the CURRENT grader's grade inputs (kept separate per company)
-    if (val(eb.raw) != null) $('#p-raw').value = val(eb.raw);
-    const companyGrades = eb[grader] || {};
-    $$('.grade-price').forEach(inp => { const v = val(companyGrades[inp.dataset.grade]); if (v != null) inp.value = v; });
-    // remember prices for THIS grader offline
-    const gm = {}; $$('.grade-price').forEach(inp => { const v = parseFloat(inp.value); if (isFinite(v)&&v>0) gm[inp.dataset.grade]=v; });
-    rememberPrices(state.scan.name, state.scan.code, grader, { raw: val(eb.raw), fee: num('#p-fee'), ship: num('#p-ship'), grades: gm });
-    // also remember the OTHER graders' data so switching grader auto-fills too (never mixing companies)
-    ['PSA','BGS','CGC'].forEach(co => {
-      if (co === grader || !eb[co]) return;
-      const g2 = {}; Object.keys(eb[co]).forEach(gr => { const v = val(eb[co][gr]); if (v != null) g2[gr] = v; });
-      rememberPrices(state.scan.name, state.scan.code, co, { raw: val(eb.raw), fee: num('#p-fee'), ship: num('#p-ship'), grades: g2 });
-    });
-    const note = $('#mem-note'); if (note) { note.textContent = `↻ Pulled from eBay sold listings (${(got.when||'now').slice(0,10)}). Typical prices — verify before buying.`; note.classList.remove('hidden'); }
+    if (got && got.ebay) {
+      const eb = got.ebay;
+      if (val(eb.raw) != null) $('#p-raw').value = val(eb.raw);
+      const companyGrades = eb[grader] || {};
+      $$('.grade-price').forEach(inp => { const v = val(companyGrades[inp.dataset.grade]); if (v != null) inp.value = v; });
+      const gm = {}; $$('.grade-price').forEach(inp => { const v = parseFloat(inp.value); if (isFinite(v)&&v>0) gm[inp.dataset.grade]=v; });
+      rememberPrices(state.scan.name, state.scan.code, grader, { raw: val(eb.raw), fee: num('#p-fee'), ship: num('#p-ship'), grades: gm });
+      ['PSA','BGS','CGC'].forEach(co => {
+        if (co === grader || !eb[co]) return;
+        const g2 = {}; Object.keys(eb[co]).forEach(gr => { const v = val(eb[co][gr]); if (v != null) g2[gr] = v; });
+        rememberPrices(state.scan.name, state.scan.code, co, { raw: val(eb.raw), fee: num('#p-fee'), ship: num('#p-ship'), grades: g2 });
+      });
+      const note = $('#mem-note'); if (note) { note.textContent = `↻ Loaded latest saved prices (${(got.when||'now').slice(0,10)}). Requested a fresh update too — open the extension in Chrome.`; note.classList.remove('hidden'); }
+    } else {
+      ocrStatusCalc('📲 Update requested. Open the DBZ extension in Chrome → Fetch, then tap this again to load the prices.');
+    }
   } catch (e) {
     ocrStatusCalc('Cloud request failed. Check your internet and try again.');
-  } finally {
-    hideLoader();
   }
 }
 
@@ -718,7 +708,9 @@ function openInvEditor(id){
   const card = Collection.getCard(it.cardKey) || {};
   if ($('#ed-card-name')) $('#ed-card-name').value = card.name || '';
   if ($('#ed-card-number')) $('#ed-card-number').value = card.number || '';
-  $('#ed-acq-price').value = a.price ?? (it.purchaseCost ?? '');   // migrate old purchaseCost
+  $('#ed-acq-price').value = a.price ?? (it.purchaseCost ?? '');   // migrate old purchaseCost (stored PER-UNIT)
+  if ($('#ed-price-mode')) $('#ed-price-mode').value = 'each';      // stored value is per-unit
+  if ($('#ed-qty-label')) $('#ed-qty-label').textContent = (it.qty>1) ? `· qty ${it.qty}` : '';
   $('#ed-acq-ship').value = a.shipping ?? '';
   $('#ed-acq-tax').value = a.tax ?? '';
   $('#ed-acq-other').value = a.other ?? '';
@@ -737,14 +729,27 @@ function openInvEditor(id){
 }
 function closeInvEditor(){ $('#inv-editor').classList.add('hidden'); invEditingId = null; }
 function edNum(id){ const v = parseFloat($(id).value); return isFinite(v) ? v : 0; }
+// Convert the editor's acquisition inputs to PER-UNIT (stored per-unit). Total mode ÷ qty.
+function edPerUnitAcq(){
+  const it = invFindItem(invEditingId);
+  const qty = Math.max(1, (it && it.qty) || 1);
+  const mode = ($('#ed-price-mode') && $('#ed-price-mode').value) || 'each';
+  const div = mode === 'total' ? qty : 1;
+  return { qty, price:edNum('#ed-acq-price')/div, shipping:edNum('#ed-acq-ship')/div, tax:edNum('#ed-acq-tax')/div, other:edNum('#ed-acq-other')/div };
+}
 function updateInvBasisPreview(){
-  const probe = { acq:{price:edNum('#ed-acq-price'), shipping:edNum('#ed-acq-ship'), tax:edNum('#ed-acq-tax'), other:edNum('#ed-acq-other')},
-                  grading:{fee:edNum('#ed-grd-fee'), shipTo:edNum('#ed-grd-shipto'), shipBack:edNum('#ed-grd-shipback'), other:edNum('#ed-grd-other')} };
-  const basis = Inventory.costBasis(probe);
+  const u = edPerUnitAcq();
+  const probe = { qty:u.qty,
+    acq:{ price:u.price, shipping:u.shipping, tax:u.tax, other:u.other },
+    grading:{ fee:edNum('#ed-grd-fee'), shipTo:edNum('#ed-grd-shipto'), shipBack:edNum('#ed-grd-shipback'), other:edNum('#ed-grd-other') } };
+  const perUnit = Inventory.costBasis(probe);
+  const total = Inventory.costBasisTotal(probe);
   const be = Inventory.breakEven(probe);
   const el = $('#inv-ed-basis');
-  if (el) el.innerHTML = `<div class="inv-sum-row"><span>Total cost basis</span><b>${money(basis)}</b></div>`+
-                         `<div class="inv-sum-row"><span>Break-even (after fees)</span><b>${money(be)}</b></div>`;
+  if (el) el.innerHTML =
+    `<div class="inv-sum-row"><span>Total cost (${u.qty} card${u.qty===1?'':'s'})</span><b>${money(total)}</b></div>`+
+    `<div class="inv-sum-row"><span>Per card</span><b>${money(perUnit)}</b></div>`+
+    `<div class="inv-sum-row"><span>Break-even each (after fees)</span><b>${money(be)}</b></div>`;
 }
 function saveInvEditor(){
   const it = invFindItem(invEditingId); if (!it) { closeInvEditor(); return; }
@@ -759,7 +764,7 @@ function saveInvEditor(){
     if (moved) invEditingId = moved.id; // id is stable; cardKey updated internally
   }
   const patch = {
-    acq: { price:edNum('#ed-acq-price'), shipping:edNum('#ed-acq-ship'), tax:edNum('#ed-acq-tax'), other:edNum('#ed-acq-other'), date:$('#ed-acq-date').value||null },
+    acq: (()=>{ const u=edPerUnitAcq(); return { price:Inventory.round2(u.price), shipping:Inventory.round2(u.shipping), tax:Inventory.round2(u.tax), other:Inventory.round2(u.other), date:$('#ed-acq-date').value||null }; })(),
     grading: { fee:edNum('#ed-grd-fee'), shipTo:edNum('#ed-grd-shipto'), shipBack:edNum('#ed-grd-shipback'), other:edNum('#ed-grd-other') },
     status: $('#ed-status').value,
     listPrice: $('#ed-list-price').value!=='' ? edNum('#ed-list-price') : null
@@ -950,16 +955,35 @@ function renderBizDashboard(){
 }
 
 // Refresh prices for every held (unsold) card via the cloud (queues each, records history).
+// Is a card's latest recorded price older than N days (or missing)? -> needs update.
+function cardIsStale(cardKey, days){
+  const cutoff = Date.now() - days*24*60*60*1000;
+  let newest = 0;
+  ['ebay','tcgplayer','130point'].forEach(src=>{
+    ['RAW','PSA','BGS','CGC','SGC'].forEach(co=>{
+      const grades = co==='RAW' ? [null] : ['10','9.5','9'];
+      grades.forEach(g=>{
+        const h = Collection.priceHistory(cardKey, src, co, g);
+        if (h.length){ const t = new Date(h[h.length-1].t || h[h.length-1].date || 0).getTime(); if (t>newest) newest=t; }
+      });
+    });
+  });
+  return newest < cutoff;   // never priced OR older than the cutoff
+}
+
 async function refreshAllHeld(){
   if (!window.Cloud || !Cloud.configured()) { alert('Cloud not set up. Paste your Firebase URL in cloud.js.'); return; }
   const held = (Collection.items()||[]).filter(it => it.status!=='sold');
-  const cards = {};
-  held.forEach(it => { const c = Collection.getCard(it.cardKey); if (c) cards[Cloud.keyFor(c.name, c.number)] = c; });
-  const keys = Object.keys(cards);
-  if (!keys.length) { $('#dash-refresh-note').textContent = 'No held cards to refresh.'; return; }
+  const seen = {}; const stale = [];
+  held.forEach(it => {
+    const c = Collection.getCard(it.cardKey); if (!c) return;
+    const k = Cloud.keyFor(c.name, c.number); if (seen[k]) return; seen[k]=1;
+    if (cardIsStale(it.cardKey, 7)) stale.push(c);   // only stale/never-priced (>7 days)
+  });
   const note = $('#dash-refresh-note');
-  note.textContent = `Queued ${keys.length} card${keys.length===1?'':'s'}. Open Chrome (extension auto-mode on) — prices land as they\u2019re fetched, then reopen this tab.`;
-  for (const k of keys) { const c = cards[k]; try { await Cloud.enqueue(c.name, c.number, { set:c.set, variant:c.variant }); } catch(e){} }
+  if (!stale.length) { if(note) note.textContent = 'All held cards updated within 7 days — nothing to fetch. ✓'; return; }
+  for (const c of stale) { try { await Cloud.enqueue(c.name, c.number, { set:c.set, variant:c.variant }); } catch(e){} }
+  if (note) note.textContent = `📲 Requested ${stale.length} stale card${stale.length===1?'':'s'} (fresh ones skipped). Open the DBZ extension in Chrome → click Fetch. It works through them slowly.`;
 }
 
 /* ---------- Grading workflow (Phase 4) ---------- */
@@ -1170,10 +1194,15 @@ function snapsForRange(){
 function drawChart(canvasId, points, readoutId, dateFmt){
   const canvas = $('#'+canvasId); if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap DPR (iOS 3x can balloon the buffer)
   const wrap = canvas.parentElement;
   let cssW = wrap && wrap.getBoundingClientRect ? Math.floor(wrap.getBoundingClientRect().width) : 0;
-  if (!cssW) cssW = canvas.clientWidth || 300; cssW = Math.max(1, cssW);
+  // If the pane isn't laid out yet (hidden/mid-transition on iOS), width is 0 — defer one frame.
+  if (!cssW || cssW < 40) {
+    if (!canvas._retry) { canvas._retry = 1; requestAnimationFrame(() => { canvas._retry = 0; drawChart(canvasId, points, readoutId, dateFmt); }); }
+    return;
+  }
+  cssW = Math.min(cssW, 560);                 // clamp to a sane max width
   const cssH = canvas.getAttribute('height') ? +canvas.getAttribute('height') : 180;
   canvas.style.width = cssW+'px'; canvas.style.height = cssH+'px';
   canvas.width = cssW*dpr; canvas.height = cssH*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,cssW,cssH);
@@ -1243,9 +1272,32 @@ const GRADE_ROWS = [
 ];
 const PRICE_SOURCES = ['tcgplayer','ebay','130point'];
 
+// One-shot: read this card's cloud prices; if any are newer than what we have, record + re-render.
+let _lastSynced = {};
+async function syncCloudPricesForCard(key){
+  if (!window.Cloud || !Cloud.configured()) return;
+  const card = Collection.getCard(key); if (!card) return;
+  try {
+    const got = await Cloud.getPrice(Cloud.keyFor(card.name, card.number));
+    if (!got || !got.when) return;
+    if (_lastSynced[key] === got.when) return;   // already synced this exact snapshot
+    _lastSynced[key] = got.when;
+    const v=s=>(s&&s.trimmedAvg!=null)?s.trimmedAvg:null;
+    let recorded=false;
+    ['ebay','tcgplayer','130point'].forEach(src=>{
+      const node=got[src]; if(!node) return;
+      if (v(node.raw)!=null){ Collection.recordPrice(key, src, 'RAW', null, v(node.raw), node.raw); recorded=true; }
+      ['PSA','BGS','CGC','SGC'].forEach(co => { if(!node[co])return; Object.keys(node[co]).forEach(g=>{ const p=v(node[co][g]); if(p!=null){ Collection.recordPrice(key, src, co, g, p, node[co][g]); recorded=true; } }); });
+    });
+    if (recorded && currentCardKey === key) { Collection.snapshotNow(); openCardDetail(key); }
+  } catch (e) {}
+}
+
 function openCardDetail(key){
   currentCardKey = key;
   const card = Collection.getCard(key) || {};
+  // silently pull any newer cloud prices for this card (single read, no polling) then re-render
+  syncCloudPricesForCard(key);
   $('#cd-name').textContent = card.name || 'Card';
   $('#cd-meta').textContent = [card.number, card.set, card.variant, card.rarity, card.language].filter(Boolean).join(' · ');
 
@@ -1294,26 +1346,25 @@ function addCurrentToCollection(){
 async function refreshCardPrices(){
   const card = Collection.getCard(currentCardKey); if (!card) return;
   if (!window.Cloud || !Cloud.configured()) { alert('Cloud not set up. Paste your Firebase URL in cloud.js.'); return; }
-  showLoader('Refreshing prices from the cloud…');
-  showProgress('This can take a minute or two — Chrome is searching eBay separately for each grade so nothing gets mixed. Keep Chrome open with the extension on.');
   try {
+    // 1) request a price update (the extension fulfills it next time you open it in Chrome)
     await Cloud.enqueue(card.name, card.number, { set: card.set, variant: card.variant });
+    // 2) also pull anything already in the cloud right now (in case it was fetched before)
     const key = Cloud.keyFor(card.name, card.number);
-    let got=null;
-    for (let i=0;i<60;i++){ setProgress((i/60)*100); showLoader(`Waiting for Chrome to fetch… (${(i*2)|0}s)`); await new Promise(r=>setTimeout(r,2000));
-      try{ const p=await Cloud.getPrice(key); if(p&&(p.ebay||p.tcgplayer||p['130point'])){ got=p; setProgress(100); break; } }catch(e){} }
-    if (!got||!(got.ebay||got.tcgplayer||got['130point'])){ alert('No prices yet. Open Chrome with the extension (auto-mode on) to fetch them.'); return; }
+    let got=null; try{ got = await Cloud.getPrice(key); }catch(e){}
     const v=s=>(s&&s.trimmedAvg!=null)?s.trimmedAvg:null;
-    // record each SOURCE into history, each market kept separate (never mixing source/company/grade)
-    ['ebay','tcgplayer','130point'].forEach(src=>{
+    let recorded=false;
+    if (got) ['ebay','tcgplayer','130point'].forEach(src=>{
       const node=got[src]; if(!node) return;
-      if (v(node.raw)!=null) Collection.recordPrice(currentCardKey, src, 'RAW', null, v(node.raw), node.raw);
-      ['PSA','BGS','CGC','SGC'].forEach(co => { if(!node[co])return; Object.keys(node[co]).forEach(g=>{ const p=v(node[co][g]); if(p!=null) Collection.recordPrice(currentCardKey, src, co, g, p, node[co][g]); }); });
+      if (v(node.raw)!=null){ Collection.recordPrice(currentCardKey, src, 'RAW', null, v(node.raw), node.raw); recorded=true; }
+      ['PSA','BGS','CGC','SGC'].forEach(co => { if(!node[co])return; Object.keys(node[co]).forEach(g=>{ const p=v(node[co][g]); if(p!=null){ Collection.recordPrice(currentCardKey, src, co, g, p, node[co][g]); recorded=true; } }); });
     });
-    Collection.snapshotNow();
+    if (recorded) Collection.snapshotNow();
     openCardDetail(currentCardKey); // re-render
+    alert(recorded
+      ? '✓ Requested a fresh update AND loaded the latest saved prices.\nOpen the extension in Chrome to fetch newer ones.'
+      : '📲 Price update requested.\nOpen the DBZ extension in Chrome — it will show this card as requested. Click "Fetch", then reopen this card here.');
   } catch(e){ alert('Cloud request failed. Check your internet.'); }
-  finally { hideLoader(); }
 }
 
 /* export/import collection */
@@ -1413,6 +1464,7 @@ if ($('#inv-search')) $('#inv-search').addEventListener('input', e => { invSearc
 ['#ed-acq-price','#ed-acq-ship','#ed-acq-tax','#ed-acq-other','#ed-grd-fee','#ed-grd-shipto','#ed-grd-shipback','#ed-grd-other'].forEach(id=>{
   const el = $(id); if (el) el.addEventListener('input', updateInvBasisPreview);
 });
+if ($('#ed-price-mode')) $('#ed-price-mode').addEventListener('change', updateInvBasisPreview);
 // product form: live cost-per-unit preview
 ['#pf-qty','#pf-price','#pf-ship','#pf-tax'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateProdPerUnit); });
 // grading form: live basis preview

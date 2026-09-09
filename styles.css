@@ -250,3 +250,8 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 
 /* Top 10 last-updated line */
 .ti-updated{font-size:10px;color:var(--muted);margin-top:4px;font-style:italic;}
+
+/* ---- Chart sizing (prevents iOS super-long/stretched canvas bug) ---- */
+.chart-wrap{width:100%;max-width:100%;overflow:hidden;position:relative;}
+.chart-wrap canvas{display:block;width:100%!important;max-width:100%;height:180px;}
+#cd-chart{height:160px;}

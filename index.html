@@ -89,7 +89,7 @@
         <div class="sr-title">Prices you found</div>
         <p class="mem-note hidden" id="mem-note"></p>
         <div class="auto-pull-row">
-          <button class="btn-secondary" data-action="auto-pull">🖥️ Auto-pull from my Mac</button>
+          <button class="btn-secondary" data-action="auto-pull">🔄 Request price update</button>
         </div>
         <label class="field"><span>Raw price (what you'd pay) $</span><input type="number" id="p-raw" inputmode="decimal" step="0.01" placeholder="0.00" /></label>
         <label class="field"><span>Grader</span>
@@ -228,8 +228,8 @@
           <div class="biz-hero-sub" id="dash-sub">—</div>
         </div>
         <div class="dash-grid" id="dash-grid"></div>
-        <button class="btn-secondary block" data-action="dash-refresh-all" style="margin-top:10px">↻ Refresh all held cards' prices</button>
-        <p class="hint" id="dash-refresh-note" style="margin-top:4px"></p>
+        <button class="btn-secondary block" data-action="dash-refresh-all" style="margin-top:10px">🔄 Update prices (stale cards only)</button>
+        <p class="hint" id="dash-refresh-note" style="margin-top:4px">Only fetches cards not updated in 7+ days — keeps volume low. Fetch runs in the Chrome extension.</p>
       </div>
       <div class="card-block">
         <div class="sr-title">TCG Inventory</div>
@@ -378,15 +378,18 @@
           <label class="field"><span>Card name</span><input type="text" id="ed-card-name" placeholder="Card name"></label>
           <label class="field"><span>Card number</span><input type="text" id="ed-card-number" placeholder="FB03-139"></label>
 
-          <div class="inv-ed-group-title">Acquisition costs</div>
+          <div class="inv-ed-group-title">Acquisition costs <span id="ed-qty-label" style="font-weight:400;opacity:.7"></span></div>
           <div class="cost-row">
             <label class="field"><span>Purchase price</span><input type="number" id="ed-acq-price" inputmode="decimal" step="0.01" placeholder="0"></label>
-            <label class="field"><span>Shipping</span><input type="number" id="ed-acq-ship" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Price is</span>
+              <select id="ed-price-mode" class="inv-select"><option value="each">Per card (each)</option><option value="total">Total (all copies)</option></select>
+            </label>
           </div>
           <div class="cost-row">
+            <label class="field"><span>Shipping</span><input type="number" id="ed-acq-ship" inputmode="decimal" step="0.01" placeholder="0"></label>
             <label class="field"><span>Tax</span><input type="number" id="ed-acq-tax" inputmode="decimal" step="0.01" placeholder="0"></label>
-            <label class="field"><span>Other</span><input type="number" id="ed-acq-other" inputmode="decimal" step="0.01" placeholder="0"></label>
           </div>
+          <label class="field"><span>Other</span><input type="number" id="ed-acq-other" inputmode="decimal" step="0.01" placeholder="0"></label>
           <label class="field"><span>Purchase date</span><input type="date" id="ed-acq-date"></label>
 
           <div class="inv-ed-group-title">Grading costs (optional)</div>
@@ -460,7 +463,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v37';
+    window.APP_VERSION = 'v41';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');
