@@ -1,5 +1,5 @@
 /* DBZ Money Maker service worker — network-first app shell, auto-updating */
-const CACHE = 'dbz-v59';
+const CACHE = 'dbz-v61';
 const ASSETS = ['./','./index.html','./styles.css','./app.js','./collection.js','./inventory.js','./bridge-export.js','./products.js','./backup.js','./manifest.json','./icon-192.png','./icon-512.png','./update-banner.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });

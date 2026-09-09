@@ -93,9 +93,10 @@ function showView(v) {
   $$('.pane').forEach(p => p.classList.remove('active'));
   $('#pane-' + v).classList.add('active');
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === v));
-  $('#view-title').textContent = { scan: 'Scan', collection: 'Collection', carddetail: 'Card', inventory: 'Business' }[v] || 'DBZ';
+  $('#view-title').textContent = { scan: 'Scan', collection: 'Collection', carddetail: 'Card', inventory: 'Inventory', business: 'Business' }[v] || 'DBZ';
   if (v === 'collection') renderCollection();
   if (v === 'inventory') renderInventory();
+  if (v === 'business') renderProducts();
 }
 
 /* ---------- camera + OCR ---------- */
@@ -695,14 +696,13 @@ function renderInventory(){
 
   // list
   const listEl = $('#inv-list');
-  if (!listEl) { renderProducts(); return; }
+  if (!listEl) return;
   if (!filtered.length) { listEl.innerHTML = `<p class="hint">No items${invStatusFilter!=='all'?' with this status':''} yet. Add cards to your Collection and they'll appear here with full cost-basis tracking.</p>`; return; }
 
   listEl.innerHTML = groupInventory(filtered).map(group => {
     if (group.items.length === 1) return renderInvItemRow(group.items[0]);
     return renderInvStack(group);
   }).join('');
-  renderProducts();
 }
 
 // Group items into stacks: same card + condition + grade-company + grade + status.
@@ -735,7 +735,7 @@ function renderInvStack(group){
     profitLine = `<span class="muted">${items.length} copies · tap to expand</span>`;
   }
   const c = invItemCard(first);
-  const sub = items.map(it => renderInvItemRow(it)).join('');
+  const sub = items.map(it => renderInvItemRow(it, true)).join('');
   return `<div class="inv-item inv-stack" data-inv-stack="${group.key}">
       <div class="inv-item-head" data-action="inv-expand" data-id="${group.key}">
         <div class="inv-thumb">${c.image?`<img src="${c.image}" alt="">`:'🃏'}</div>
@@ -754,12 +754,12 @@ function renderInvStack(group){
 }
 
 // Render ONE inventory item row (used for singles and for each copy inside an expanded stack).
-function renderInvItemRow(it){
+function renderInvItemRow(it, forceExpanded){
     const basis = Inventory.costBasis(it);
     const p = Inventory.profitability(it);
     const st = it.status || 'in_inventory';
     const be = Inventory.breakEven(it);
-    const expanded = invExpanded === it.id;
+    const expanded = forceExpanded || invExpanded === it.id;
     let profitLine;
     if (p.realized) {
       profitLine = `<span class="${p.profit>=0?'pos':'neg'}">Sold ${money(p.salePrice)} · net ${money(p.net)} · profit ${money(p.profit)}${p.roi!=null?` (${p.roi}%)`:''}</span>`;
@@ -772,7 +772,7 @@ function renderInvItemRow(it){
       Inventory.minSellTable(it).map(r=>`<div class="inv-ms-row"><span>${r.label}</span><b>${money(r.price)}</b></div>`).join('')+
       `<div class="inv-ms-note">Break-even & margins include selling fees (${Inventory.settings().feePct}% + $${Inventory.settings().feeFlat}).</div></div>` : '';
     return `<div class="inv-item" data-inv-id="${it.id}">
-      <div class="inv-item-head" data-action="inv-expand" data-id="${it.id}">
+      <div class="inv-item-head"${forceExpanded ? '' : ` data-action="inv-expand" data-id="${it.id}"`}>
         <div class="inv-thumb">${(()=>{const c=invItemCard(it); return c.image?`<img src="${c.image}" alt="">`:'🃏';})()}</div>
         <div class="inv-item-main">
           <div class="inv-item-name">${escapeHtmlSafe(invItemName(it))}</div>
@@ -1231,7 +1231,16 @@ function renderProducts(){
       profitLine = `<div class="inv-item-profit"><span class="${pr.projectedProfit>=0?'pos':'neg'}">Opened ${pr.openedUnits}: pulls ${pr.pulls} · sold ${money(pr.soldRevenue)} · remaining ${money(pr.remainingValue)} · proj. profit ${money(pr.projectedProfit)}${pr.roi!=null?` (${pr.roi}%)`:''}</span></div>`;
     }
     const sess = Products.sessionsForProduct(p.id);
-    const sessLines = sess.map(s=>`<div class="prod-sess">🎴 ${escapeHtmlSafe(s.unitLabel)} — ${s.cardItemIds.length} pull${s.cardItemIds.length===1?'':'s'} <span class="prod-addpull" data-action="prod-add-pull" data-id="${s.id}">+ add pull</span></div>`).join('');
+    const sessLines = sess.map(s=>{
+      const items = (Collection.items()||[]);
+      const pulls = (s.cardItemIds||[]).map(id=>items.find(x=>x.id===id)).filter(Boolean);
+      const pullList = pulls.map(it=>{
+        const c = Collection.getCard(it.cardKey)||{};
+        const soldTag = it.status==='sold' ? ` · <span class="pos">sold ${money((it.sale&&it.sale.price)||0)}</span>` : '';
+        return `<div class="prod-pull-row">• ${escapeHtmlSafe(c.name||it.cardKey)} — basis ${money(Inventory.costBasis(it))}${soldTag}</div>`;
+      }).join('');
+      return `<div class="prod-sess">🎴 ${escapeHtmlSafe(s.unitLabel)} — ${s.cardItemIds.length} pull${s.cardItemIds.length===1?'':'s'} <span class="prod-addpull" data-action="prod-add-pull" data-id="${s.id}">+ add pull</span></div>${pullList}`;
+    }).join('');
     return `<div class="inv-item">
       <div class="inv-item-head">
         <div class="inv-thumb">${p.image?`<img src="${p.image}" alt="">`:'📦'}</div>

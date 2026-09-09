@@ -293,13 +293,19 @@
         <button class="btn-secondary block" data-action="backup-download">⬇ Download backup file</button>
         <label class="btn-secondary block import-lbl">⬆ Restore from file<input type="file" id="backup-restore-file" accept="application/json" hidden /></label>
         <p class="hint" id="backup-restore-status" style="margin-top:4px"></p>
+      </div>
       <div class="card-block">
+        <div class="sr-title">🗂️ Your Cards</div>
+        <p class="hint" style="margin-top:0">Tap a card to expand it, then Sell, set cost basis, or send to grading. Identical cards stack — expand to act on each copy.</p>
         <div id="inv-list" class="inv-list"></div>
       </div>
+    </section>
 
-      <!-- Sealed products (Phase 3) -->
+    <!-- Business: sealed products + pull cost basis -->
+    <section id="pane-business" class="pane">
       <div class="card-block">
         <div class="sr-title">Sealed Products</div>
+        <p class="hint" style="margin-top:0">Boxes, blisters &amp; packs. Open a unit, record what you pulled, and see the cost basis flow to each card. Sell bulk here too.</p>
         <button class="btn-secondary block" data-action="prod-add-open">+ Buy Sealed Product</button>
         <div id="prod-add-form" class="prod-form hidden">
           <label class="field"><span>Product name</span><input type="text" id="pf-name" placeholder="FB08 Booster Box"></label>
@@ -431,7 +437,8 @@
     <!-- nav -->
     <nav class="tabbar">
       <button class="tab active" data-view="scan"><span class="tico">📷</span><span>Scan</span></button>
-      <button class="tab" data-view="inventory"><span class="tico">📦</span><span>Business</span></button>
+      <button class="tab" data-view="business"><span class="tico">📦</span><span>Business</span></button>
+      <button class="tab" data-view="inventory"><span class="tico">🗂️</span><span>Inventory</span></button>
       <button class="tab" data-view="collection"><span class="tico">📈</span><span>Collection</span></button>
     </nav>
   </div>
@@ -465,7 +472,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v59';
+    window.APP_VERSION = 'v61';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

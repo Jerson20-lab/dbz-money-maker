@@ -133,37 +133,41 @@ const Products = (() => {
     return { openedCost, openedUnits, keeperSales:r2(keeperSales), bulk:r2(bulk), recovered, remaining, unsoldKeepers };
   }
 
-  // Cost basis for ONE pulled card, allocated PER PACK (per session):
-  // each card carries (that pack's cost) ÷ (number of unsold cards pulled from THAT pack),
-  // reduced by any bulk sales tagged to that pack. Opening packs one at a time keeps each
-  // pack's cost with its own pulls — costs are never pooled across packs.
+  // Cost basis for ONE pulled card:
+  //  - Base = that PACK's cost ÷ its unsold pulls (reduced by that pack's own keeper sales)
+  //  - Then subtract this card's even share of the PRODUCT's bulk sales (Option 1: bulk
+  //    lowers remaining cost across ALL unsold pulls of the whole product).
   function allocatedCostForItem(cardItemId){
     const s = sessions().find(x => (x.cardItemIds||[]).includes(cardItemId));
     if (!s) return 0;
     const p = getProduct(s.productId); if (!p) return 0;
     const items = (window.Collection && window.Collection.items) ? window.Collection.items() : [];
     const me = items.find(x => x.id === cardItemId);
-    // A sold card carries the pack cost it locked in at sale time.
+    // A sold card carries the cost it locked in at sale time.
     if (me && me.status === 'sold') return n(me.allocLocked) || 0;
-    // This pack's cost, reduced by sales already recovered FROM THIS PACK.
+    // --- per-pack base ---
     const packCost = r2(p.costPerUnit || 0);
     const pulls = (s.cardItemIds||[]).map(id => items.find(x=>x.id===id)).filter(Boolean);
-    let recovered = 0, unsold = 0;
+    let packRecovered = 0, packUnsold = 0;
     pulls.forEach(it => {
-      if (it.status === 'sold' && it.sale) recovered += n(it.sale.price) * (it.qty||1);
-      else unsold += (it.qty||1);
+      if (it.status === 'sold' && it.sale) packRecovered += n(it.sale.price) * (it.qty||1);
+      else packUnsold += (it.qty||1);
     });
-    recovered += packBulkTotal(s.id);
-    const remaining = Math.max(0, packCost - recovered);
-    if (unsold <= 0) return 0;
-    return r2(remaining / unsold);
+    if (packUnsold <= 0) return 0;
+    let base = Math.max(0, packCost - packRecovered) / packUnsold;
+    // --- product-level bulk, spread evenly over ALL unsold pulls of the whole product ---
+    const bulk = bulkSalesTotal(p);
+    if (bulk > 0) {
+      let productUnsold = 0;
+      sessionsForProduct(p.id).forEach(ss => (ss.cardItemIds||[]).forEach(id => {
+        const it = items.find(x=>x.id===id);
+        if (it && it.status !== 'sold') productUnsold += (it.qty||1);
+      }));
+      if (productUnsold > 0) base = Math.max(0, base - (bulk / productUnsold));
+    }
+    return r2(base);
   }
   // Bulk sales tagged to a specific pack/session (see addBulkSale sessionId param).
-  function packBulkTotal(sessionId){
-    let t = 0;
-    products().forEach(p => (p.bulkSales||[]).forEach(b => { if (b.sessionId === sessionId) t += n(b.amount); }));
-    return t;
-  }
   // Sessions WITH pulls == opened units that actually cost something. An empty session
   // (0 pulls — usually an accidental double-open) must NOT inflate the allocation.
   function openedUnitsFor(p){
