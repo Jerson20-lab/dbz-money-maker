@@ -47,7 +47,7 @@ const Products = (() => {
     const p = {
       id: uid(), name: data.name||'Sealed Product', set: data.set||'', type: data.type||'Other',
       qty, opened: 0, unitsTotal: qty, cost, costPerUnit: r2(tot/qty),
-      date: data.date||today(), status:'sealed', note: data.note||''
+      date: data.date||today(), status:'sealed', note: data.note||'', image: data.image||''
     };
     list.push(p); save(K_PROD, list);
     return p;
@@ -83,15 +83,61 @@ const Products = (() => {
   }
   function sessionsForProduct(productId){ return sessions().filter(s=>s.productId===productId); }
 
-  // Allocated cost for ONE pulled card = its unit's per-unit cost ÷ number of pulls in that session.
-  // e.g. blister $17.60 with 2 pulls -> each pull allocated $8.80. Box $100 with 12 pulls -> $8.33 each.
-  // Returns 0 if the card isn't a pull or its session/product is missing.
+  /* ---------- bulk sales + cost-recovery model ----------
+   * Opened cost of a product = opened units × costPerUnit (e.g. 1 box = its full cost).
+   * That cost is "recovered" by: keeper-card sales from this product + bulk sales.
+   * Remaining cost is spread EVENLY across the UNSOLD keepers pulled from this product.
+   * So the last unsold keeper carries whatever box cost hasn't been recovered yet.
+   */
+  function addBulkSale(productId, amount, note){
+    const l = products(); const p = l.find(x=>x.id===productId); if(!p) return;
+    if(!p.bulkSales) p.bulkSales = [];
+    p.bulkSales.push({ id:uid(), amount:n(amount), date:today(), note:note||'' });
+    save(K_PROD, l);
+  }
+  function removeBulkSale(productId, saleId){
+    const l = products(); const p = l.find(x=>x.id===productId); if(!p||!p.bulkSales) return;
+    p.bulkSales = p.bulkSales.filter(b=>b.id!==saleId); save(K_PROD, l);
+  }
+  function bulkSalesTotal(p){ return (p.bulkSales||[]).reduce((s,b)=>s+n(b.amount),0); }
+
+  // The cards (Collection items) pulled from this product.
+  function itemsForProduct(productId){
+    const ids = [];
+    sessionsForProduct(productId).forEach(s => s.cardItemIds.forEach(id => ids.push(id)));
+    const items = (window.Collection && window.Collection.items) ? window.Collection.items() : [];
+    return items.filter(it => ids.includes(it.id));
+  }
+
+  // Box recovery snapshot: opened cost, recovered so far, remaining, unsold keeper count.
+  function boxRecovery(productId){
+    const p = getProduct(productId); if(!p) return null;
+    const openedCost = r2(p.opened * p.costPerUnit);
+    const its = itemsForProduct(productId);
+    let keeperSales = 0, unsoldKeepers = 0;
+    its.forEach(it => {
+      if (it.status === 'sold' && it.sale) keeperSales += n(it.sale.price) * (it.qty||1);
+      else unsoldKeepers += (it.qty||1);
+    });
+    const bulk = bulkSalesTotal(p);
+    const recovered = r2(keeperSales + bulk);
+    const remaining = r2(Math.max(0, openedCost - recovered));  // don't go negative
+    return { openedCost, keeperSales:r2(keeperSales), bulk:r2(bulk), recovered, remaining, unsoldKeepers };
+  }
+
+  // Cost basis for ONE unsold keeper = remaining box cost ÷ number of unsold keepers.
+  // (Sold keepers already recovered their share; they don't carry basis.)
   function allocatedCostForItem(cardItemId){
     const s = sessions().find(x => x.cardItemIds.includes(cardItemId));
     if (!s) return 0;
-    const p = getProduct(s.productId); if (!p) return 0;
-    const pulls = s.cardItemIds.length || 1;
-    return r2((p.costPerUnit || 0) / pulls);
+    const rec = boxRecovery(s.productId); if (!rec) return 0;
+    // if this specific card is already sold, it carries no remaining allocation
+    const items = (window.Collection && window.Collection.items) ? window.Collection.items() : [];
+    const me = items.find(x => x.id === cardItemId);
+    // A sold keeper carries the box cost it had locked in at sale time (not 0).
+    if (me && me.status === 'sold') return n(me.allocLocked) || 0;
+    if (rec.unsoldKeepers <= 0) return 0;
+    return r2(rec.remaining / rec.unsoldKeepers);
   }
   // Which session/product a card came from (traceability helper for UI).
   function sourceOfItem(cardItemId){
@@ -161,6 +207,7 @@ const Products = (() => {
     addProduct, updateProduct, removeProduct,
     openUnit, addPullToSession, removePullFromSession, sessionsForProduct,
     allocatedCostForItem, sourceOfItem,
+    addBulkSale, removeBulkSale, bulkSalesTotal, boxRecovery, itemsForProduct,
     productProfit, profitBySet, today
   };
 })();

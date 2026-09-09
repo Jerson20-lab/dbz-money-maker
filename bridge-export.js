@@ -104,6 +104,18 @@ const BridgeExport = (() => {
           description: `Sealed: ${p.name}${p.set?' ('+p.set+')':''} — ${p.unitsTotal} unit${p.unitsTotal===1?'':'s'} @ ${money2(p.costPerUnit)}`
         });
       }
+      // bulk sales from this product are income (recovers box cost)
+      (p.bulkSales||[]).forEach(b => {
+        if ((+b.amount||0) > 0) {
+          txns.push({
+            txnId: `dbz:bulk:${b.id}`,
+            type: 'income', category: 'Sales', moneyType: 'revenue',
+            amount: Math.round((+b.amount||0)*100)/100,
+            date: b.date || p.date || null,
+            description: `Bulk from ${p.name}${p.set?' ('+p.set+')':''}${b.note?' — '+b.note:''}`
+          });
+        }
+      });
     });
     return txns;
   }

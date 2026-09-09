@@ -58,20 +58,14 @@
       </div>
 
       <div id="scan-result" class="card-block hidden">
-        <div class="sr-title">Read from card</div>
+        <div class="sr-title">Add this card</div>
         <label class="field"><span>Card name</span><input type="text" id="f-name" placeholder="e.g. Kakarot the One and Only" /></label>
         <label class="field"><span>Card code / number</span><input type="text" id="f-code" placeholder="e.g. BT1-001" /></label>
-        <p class="hint">OCR isn't perfect — fix anything it misread before looking up prices.</p>
-        <button class="btn-primary block" data-action="to-calc">Continue → Prices &amp; Flip</button>
+        <p class="hint">OCR isn't perfect — fix anything it misread first.</p>
+        <button class="btn-primary block" data-action="scan-to-business">📦 Add to Business (inventory)</button>
+        <button class="btn-secondary block" data-action="scan-to-collection" style="margin-top:8px">📈 Add to Collection</button>
       </div>
 
-      <div class="card-block">
-        <div class="sr-title">Auto-pull setup (optional)</div>
-        <p class="hint" style="margin-top:0">For free auto-prices: run the DBZ Mac Helper on your MacBook + Chrome extension (auto-mode), phone on same Wi-Fi. Enter the address the helper prints.</p>
-        <label class="field"><span>Mac helper address</span><input type="text" id="helper-url" placeholder="http://192.168.x.x:4747" /></label>
-        <button class="btn-secondary block" data-action="save-helper">Save &amp; test connection</button>
-        <p class="hint" id="helper-status"></p>
-      </div>
     </section>
 
     <!-- ============ CALC ============ -->
@@ -89,7 +83,6 @@
         <div class="sr-title">Prices you found</div>
         <p class="mem-note hidden" id="mem-note"></p>
         <div class="auto-pull-row">
-          <button class="btn-secondary" data-action="auto-pull">🔄 Request price update</button>
         </div>
         <label class="field"><span>Raw price (what you'd pay) $</span><input type="number" id="p-raw" inputmode="decimal" step="0.01" placeholder="0.00" /></label>
         <label class="field"><span>Grader</span>
@@ -171,8 +164,11 @@
       <div class="card-block">
         <button class="btn-secondary" data-action="cd-back">← Back</button>
         <div class="cd-head">
-          <div class="cd-name" id="cd-name">—</div>
-          <div class="cd-meta" id="cd-meta"></div>
+          <div class="cd-thumb" id="cd-thumb"></div>
+          <div>
+            <div class="cd-name" id="cd-name">—</div>
+            <div class="cd-meta" id="cd-meta"></div>
+          </div>
         </div>
       </div>
       <div class="card-block">
@@ -191,7 +187,7 @@
       </div>
       <div class="card-block">
         <button class="btn-primary block" data-action="cd-add">+ ADD TO COLLECTION</button>
-        <button class="btn-secondary block" data-action="cd-refresh">↻ Refresh prices (via Mac)</button>
+        <button class="btn-secondary block hidden" data-action="cd-refresh"></button>
       </div>
     </section>
 
@@ -227,10 +223,7 @@
           <div class="biz-hero-val" id="dash-total">$0.00</div>
           <div class="biz-hero-sub" id="dash-sub">—</div>
         </div>
-        <div class="dash-grid" id="dash-grid"></div>
-        <button class="btn-secondary block" data-action="dash-refresh-all" style="margin-top:10px">🔄 Update prices (stale cards only)</button>
-        <button class="btn-secondary block" data-action="dash-sync-cloud" style="margin-top:6px">☁️ Sync prices from cloud</button>
-        <p class="hint" id="dash-refresh-note" style="margin-top:4px">Only fetches cards not updated in 7+ days — keeps volume low. Fetch runs in the Chrome extension.</p>
+        <p class="hint" id="dash-refresh-note" style="margin-top:4px">Enter your buy and sell prices on each card. Export to Profit Track below.</p>
       </div>
       <div class="card-block">
         <div class="sr-title">TCG Inventory</div>
@@ -238,6 +231,10 @@
         <div id="inv-add-form" class="prod-form hidden">
           <label class="btn-secondary block import-lbl">📷 Scan card to fill name &amp; number<input type="file" id="af-scan" accept="image/*" hidden /></label>
           <p class="hint" id="af-scan-status" style="margin-top:2px"></p>
+          <div style="display:flex;align-items:center;gap:10px;margin:6px 0">
+            <div class="cd-thumb" id="af-photo-preview" style="width:44px;height:60px;font-size:22px">🃏</div>
+            <label class="btn-secondary import-lbl" style="flex:1;margin:0">🖼️ Add / change photo<input type="file" id="af-photo" accept="image/*" hidden /></label>
+          </div>
           <label class="field"><span>Card name</span><input type="text" id="af-name" placeholder="Son Gohan Youth"></label>
           <div class="cost-row">
             <label class="field"><span>Card #</span><input type="text" id="af-number" placeholder="FB03-139"></label>
@@ -306,6 +303,10 @@
         <button class="btn-secondary block" data-action="prod-add-open">+ Buy Sealed Product</button>
         <div id="prod-add-form" class="prod-form hidden">
           <label class="field"><span>Product name</span><input type="text" id="pf-name" placeholder="FB08 Booster Box"></label>
+          <div style="display:flex;align-items:center;gap:10px;margin:6px 0">
+            <div class="cd-thumb" id="pf-photo-preview" style="width:44px;height:60px;font-size:22px">📦</div>
+            <label class="btn-secondary import-lbl" style="flex:1;margin:0">🖼️ Add photo<input type="file" id="pf-photo" accept="image/*" hidden /></label>
+          </div>
           <div class="cost-row">
             <label class="field"><span>Set</span><input type="text" id="pf-set" placeholder="FB08"></label>
             <label class="field"><span>Type</span><select id="pf-type" class="inv-select"></select></label>
@@ -376,6 +377,10 @@
         </div>
         <div class="inv-editor-body">
           <div class="inv-ed-group-title">Card</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <div class="cd-thumb" id="ed-photo-preview" style="width:44px;height:60px;font-size:22px">🃏</div>
+            <label class="btn-secondary import-lbl" style="flex:1;margin:0">🖼️ Add / change photo<input type="file" id="ed-photo" accept="image/*" hidden /></label>
+          </div>
           <label class="field"><span>Card name</span><input type="text" id="ed-card-name" placeholder="Card name"></label>
           <label class="field"><span>Card number</span><input type="text" id="ed-card-number" placeholder="FB03-139"></label>
 
@@ -426,17 +431,13 @@
     <!-- nav -->
     <nav class="tabbar">
       <button class="tab active" data-view="scan"><span class="tico">📷</span><span>Scan</span></button>
-      <button class="tab" data-view="calc"><span class="tico">🧮</span><span>Flip</span></button>
-      <button class="tab" data-view="collection"><span class="tico">📈</span><span>Collection</span></button>
       <button class="tab" data-view="inventory"><span class="tico">📦</span><span>Business</span></button>
-      <button class="tab" data-view="top"><span class="tico">🏆</span><span>Top 10</span></button>
-      <button class="tab" data-view="saved"><span class="tico">⭐</span><span>Saved</span></button>
+      <button class="tab" data-view="collection"><span class="tico">📈</span><span>Collection</span></button>
     </nav>
   </div>
 
   <!-- Tesseract.js for on-device OCR (no API, no backend). Cached by SW after first load. -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="cloud.js"></script>
   <script src="collection.js"></script>
   <script src="inventory.js"></script>
   <script src="bridge-export.js"></script>
@@ -464,7 +465,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v45';
+    window.APP_VERSION = 'v50';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

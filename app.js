@@ -93,11 +93,9 @@ function showView(v) {
   $$('.pane').forEach(p => p.classList.remove('active'));
   $('#pane-' + v).classList.add('active');
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === v));
-  $('#view-title').textContent = { scan: 'Scan', calc: 'Flip', collection: 'Collection', carddetail: 'Card', inventory: 'Business', top: 'Top 10', saved: 'Saved' }[v] || 'DBZ';
-  if (v === 'saved') renderSaved();
-  if (v === 'top') rankTop();
-  if (v === 'collection') { renderCollection(); syncAllCloudPrices().then(n=>{ if(n) renderCollection(); }); }
-  if (v === 'inventory') { renderInventory(); syncAllCloudPrices().then(n=>{ if(n) renderInventory(); }); }
+  $('#view-title').textContent = { scan: 'Scan', collection: 'Collection', carddetail: 'Card', inventory: 'Business' }[v] || 'DBZ';
+  if (v === 'collection') renderCollection();
+  if (v === 'inventory') renderInventory();
 }
 
 /* ---------- camera + OCR ---------- */
@@ -145,10 +143,33 @@ async function ocrFromFile(file) {
 }
 
 /* Read only two regions: top strip (name) and bottom-right (card code). Faster + more accurate. */
+// Shrink a canvas to a small JPEG thumbnail (data URL) so it's tiny in storage (~15KB).
+function makeThumb(canvas, maxW){
+  try {
+    maxW = maxW || 160;
+    const scale = Math.min(1, maxW / canvas.width);
+    const w = Math.round(canvas.width * scale), h = Math.round(canvas.height * scale);
+    const t = document.createElement('canvas'); t.width = w; t.height = h;
+    t.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    return t.toDataURL('image/jpeg', 0.7);
+  } catch (e) { return ''; }
+}
+// Read an image FILE into a small thumbnail data URL (for manual "add photo").
+function fileToThumb(file){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{ const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight; c.getContext('2d').drawImage(img,0,0); resolve(makeThumb(c)); };
+    img.onerror = ()=>resolve('');
+    img.src = URL.createObjectURL(file);
+  });
+}
 async function runOcr(canvas) {
   if (typeof Tesseract === 'undefined') { ocrStatus('OCR engine still loading — try again in a second.', true); return; }
   ocrStatus('Reading card…');
   showLoader('Reading card…');
+  // capture a thumbnail of the scanned card so it can be saved as the card's image
+  state.scan = state.scan || {};
+  state.scan.image = makeThumb(canvas);
   const W = canvas.width, H = canvas.height;
   const nameRegion = cropCanvas(canvas, 0, 0, W, Math.round(H * 0.18));            // top strip
   const codeRegion = cropCanvas(canvas, Math.round(W * 0.55), Math.round(H * 0.82), Math.round(W * 0.45), Math.round(H * 0.18)); // bottom-right
@@ -629,8 +650,6 @@ function invGradeLabel(it){
 function renderInventory(){
   renderBizDashboard();
   renderBackupStatus();
-  publishHeldCards();
-  pushLedgerToCloud();
   // populate status filter once
   const sel = $('#inv-status-filter');
   if (sel && sel.options.length <= 1) {
@@ -698,6 +717,7 @@ function renderInventory(){
       `<div class="inv-ms-note">Break-even & margins include selling fees (${Inventory.settings().feePct}% + $${Inventory.settings().feeFlat}).</div></div>` : '';
     return `<div class="inv-item" data-inv-id="${it.id}">
       <div class="inv-item-head" data-action="inv-expand" data-id="${it.id}">
+        <div class="inv-thumb">${(()=>{const c=invItemCard(it); return c.image?`<img src="${c.image}" alt="">`:'🃏';})()}</div>
         <div class="inv-item-main">
           <div class="inv-item-name">${escapeHtmlSafe(invItemName(it))}</div>
           <div class="inv-item-sub">${invGradeLabel(it)} · qty ${it.qty||1} · <span class="inv-badge inv-${st}">${Inventory.statusLabel(st)}</span></div>
@@ -724,6 +744,7 @@ function escapeHtmlSafe(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&a
 
 /* inventory item editor */
 let invEditingId = null;
+let _edPhoto = '';
 function invFindItem(id){ return (Collection.items()||[]).find(x=>x.id===id) || null; }
 function openInvEditor(id){
   const it = invFindItem(id); if (!it) return;
@@ -736,6 +757,8 @@ function openInvEditor(id){
   const card = Collection.getCard(it.cardKey) || {};
   if ($('#ed-card-name')) $('#ed-card-name').value = card.name || '';
   if ($('#ed-card-number')) $('#ed-card-number').value = card.number || '';
+  _edPhoto = card.image || '';
+  if ($('#ed-photo-preview')) $('#ed-photo-preview').innerHTML = _edPhoto ? `<img src="${_edPhoto}" style="width:100%;height:100%;object-fit:cover">` : '🃏';
   $('#ed-acq-price').value = a.price ?? (it.purchaseCost ?? '');   // migrate old purchaseCost (stored PER-UNIT)
   if ($('#ed-price-mode')) $('#ed-price-mode').value = 'each';      // stored value is per-unit
   if ($('#ed-qty-label')) $('#ed-qty-label').textContent = (it.qty>1) ? `· qty ${it.qty}` : '';
@@ -791,6 +814,8 @@ function saveInvEditor(){
     const moved = (Collection.items()||[]).find(x => x.id === invEditingId);
     if (moved) invEditingId = moved.id; // id is stable; cardKey updated internally
   }
+  // save photo (if changed) onto the (possibly renamed) card
+  { const cur = invFindItem(invEditingId); if (cur) { const c = Collection.getCard(cur.cardKey)||{}; Collection.upsertCard({ name:c.name, number:c.number, set:c.set, variant:c.variant, language:c.language, image:_edPhoto||c.image||'' }); } }
   const patch = {
     acq: (()=>{ const u=edPerUnitAcq(); return { price:Inventory.round2(u.price), shipping:Inventory.round2(u.shipping), tax:Inventory.round2(u.tax), other:Inventory.round2(u.other), date:$('#ed-acq-date').value||null }; })(),
     grading: { fee:edNum('#ed-grd-fee'), shipTo:edNum('#ed-grd-shipto'), shipBack:edNum('#ed-grd-shipback'), other:edNum('#ed-grd-other') },
@@ -803,6 +828,12 @@ function saveInvEditor(){
                    fees: $('#ed-sale-fees').value!=='' ? edNum('#ed-sale-fees') : Inventory.feeOn(edNum('#ed-sale-price')),
                    date: $('#ed-sale-date').value || Collection.today() };
     if (patch.status !== 'sold') patch.status = 'sold'; // recording a sale => sold
+  }
+  // If this card is a pull being SOLD, lock in its current allocated box cost now,
+  // so its profit uses the box cost it was carrying at sale time (not 0 afterward).
+  if (patch.status === 'sold' && window.Products && Products.allocatedCostForItem) {
+    const live = Products.allocatedCostForItem(invEditingId);
+    if (live > 0) patch.allocLocked = live;
   }
   Collection.updateItem(invEditingId, patch);
   closeInvEditor();
@@ -880,6 +911,7 @@ function restoreBackupFile(file){
 }
 
 /* ---------- Add card directly to inventory (Business tab) ---------- */
+let _afPhoto = '';   // photo chosen on the add-card form (thumbnail data URL)
 // Scan a card image and fill the add-card form's name/number (reuses OCR pipeline).
 async function scanIntoAddCard(file){
   const st = $('#af-scan-status');
@@ -946,7 +978,7 @@ function saveAddCard(){
   if (!name) { alert('Enter a card name.'); return; }
   const cond = $('#af-cond').value;
   const u = afPerUnit();
-  const card = Collection.upsertCard({ name, number:$('#af-number').value.trim(), set:$('#af-set').value.trim(), variant:'', language:'EN' });
+  const card = Collection.upsertCard({ name, number:$('#af-number').value.trim(), set:$('#af-set').value.trim(), variant:'', language:'EN', image: _afPhoto || '' });
   const it = Collection.addItem(card.key, {
     condition: cond,
     company: cond==='graded' ? $('#af-company').value : null,
@@ -961,6 +993,7 @@ function saveAddCard(){
   });
   // reset + hide
   ['#af-name','#af-number','#af-set','#af-qty','#af-grade','#af-price','#af-ship','#af-tax','#af-other'].forEach(id=>{ if($(id)) $(id).value=''; });
+  _afPhoto=''; if($('#af-photo-preview')) $('#af-photo-preview').innerHTML='🃏';
   $('#inv-add-form').classList.add('hidden');
   renderInventory();
 }
@@ -1098,6 +1131,7 @@ function saveGradeEditor(){
 }
 
 /* ---------- Sealed Products + Rip Sessions (Phase 3) ---------- */
+let _pfPhoto = '';
 function renderProducts(){
   // populate type dropdown once
   const typeSel = $('#pf-type');
@@ -1116,9 +1150,10 @@ function renderProducts(){
       profitLine = `<div class="inv-item-profit"><span class="${pr.projectedProfit>=0?'pos':'neg'}">Opened ${pr.openedUnits}: pulls ${pr.pulls} · sold ${money(pr.soldRevenue)} · remaining ${money(pr.remainingValue)} · proj. profit ${money(pr.projectedProfit)}${pr.roi!=null?` (${pr.roi}%)`:''}</span></div>`;
     }
     const sess = Products.sessionsForProduct(p.id);
-    const sessLines = sess.map(s=>`<div class="prod-sess" data-action="prod-session" data-id="${s.id}">🎴 ${escapeHtmlSafe(s.unitLabel)} — ${s.cardItemIds.length} pull${s.cardItemIds.length===1?'':'s'} <span class="prod-addpull" data-action="prod-add-pull" data-id="${s.id}">+ add pull</span></div>`).join('');
+    const sessLines = sess.map(s=>`<div class="prod-sess">🎴 ${escapeHtmlSafe(s.unitLabel)} — ${s.cardItemIds.length} pull${s.cardItemIds.length===1?'':'s'} <span class="prod-addpull" data-action="prod-add-pull" data-id="${s.id}">+ add pull</span></div>`).join('');
     return `<div class="inv-item">
       <div class="inv-item-head">
+        <div class="inv-thumb">${p.image?`<img src="${p.image}" alt="">`:'📦'}</div>
         <div class="inv-item-main">
           <div class="inv-item-name">${escapeHtmlSafe(p.name)}</div>
           <div class="inv-item-sub">${escapeHtmlSafe(p.type)}${p.set?' · '+escapeHtmlSafe(p.set):''} · sealed ${p.qty} / opened ${p.opened} · ${money(p.costPerUnit)}/unit</div>
@@ -1127,6 +1162,14 @@ function renderProducts(){
       </div>
       ${profitLine}
       ${sessLines}
+      ${p.opened>0 ? (()=>{ const r=Products.boxRecovery(p.id); if(!r) return '';
+        const bulkLines=(p.bulkSales||[]).map(b=>`<div class="prod-bulk-row">💵 Bulk sold ${money(b.amount)}${b.note?' · '+escapeHtmlSafe(b.note):''} <span class="prod-bulk-del" data-action="prod-bulk-del" data-id="${p.id}" data-sid="${b.id}">✕</span></div>`).join('');
+        return `<div class="prod-recovery">
+          <div class="prod-rec-bar"><div class="prod-rec-fill" style="width:${Math.min(100,r.openedCost?Math.round(r.recovered/r.openedCost*100):0)}%"></div></div>
+          <div class="prod-rec-txt">Recovered <b>${money(r.recovered)}</b> of ${money(r.openedCost)} · <b>${money(r.remaining)}</b> left${r.unsoldKeepers>0?` across ${r.unsoldKeepers} keeper${r.unsoldKeepers===1?'':'s'} (${money(r.unsoldKeepers?r.remaining/r.unsoldKeepers:0)} each)`:' · all recovered ✓'}</div>
+          ${bulkLines}
+          <button class="btn-secondary block" data-action="prod-sell-bulk" data-id="${p.id}">💵 Sell bulk from this ${escapeHtmlSafe(p.type||'product')}</button>
+        </div>`; })() : ''}
       ${canOpen ? `<button class="btn-secondary block inv-edit-btn" data-action="prod-open" data-id="${p.id}">📦 Open a unit</button>` : ''}
     </div>`;
   }).join('');
@@ -1145,6 +1188,16 @@ function updateProdPerUnit(){
   if (el) el.innerHTML = `<div class="inv-sum-row"><span>Total cost</span><b>${money(Math.round(tot*100)/100)}</b></div>`+
                          `<div class="inv-sum-row"><span>Cost per unit</span><b>${money(Math.round(tot/qty*100)/100)}</b></div>`;
 }
+function sellBulkFromProduct(productId){
+  if (!window.Products) return;
+  const p = Products.getProduct(productId); if (!p) return;
+  const raw = prompt(`Sell bulk from "${p.name}"\n\nHow much did the bulk sell for? (this reduces the box's remaining cost across your unsold keepers)`, '');
+  if (raw === null) return;
+  const amt = parseFloat(String(raw).replace(/[^0-9.]/g,''));
+  if (!isFinite(amt) || amt <= 0) { alert('Enter a dollar amount greater than 0.'); return; }
+  Products.addBulkSale(productId, amt, '');
+  renderProducts(); renderInventory();
+}
 function saveProduct(){
   if (!window.Products) return;
   const name = $('#pf-name').value.trim();
@@ -1152,10 +1205,12 @@ function saveProduct(){
   Products.addProduct({
     name, set:$('#pf-set').value.trim(), type:$('#pf-type').value,
     qty: parseInt($('#pf-qty').value,10)||1,
-    price: prodNum('#pf-price'), shipping: prodNum('#pf-ship'), tax: prodNum('#pf-tax')
+    price: prodNum('#pf-price'), shipping: prodNum('#pf-ship'), tax: prodNum('#pf-tax'),
+    image: _pfPhoto || ''
   });
   // reset + hide
   ['#pf-name','#pf-set','#pf-qty','#pf-price','#pf-ship','#pf-tax'].forEach(id=>{ if($(id)) $(id).value=''; });
+  _pfPhoto=''; if($('#pf-photo-preview')) $('#pf-photo-preview').innerHTML='📦';
   $('#prod-add-form').classList.add('hidden');
   renderProducts();
 }
@@ -1281,7 +1336,7 @@ function renderHoldings(){
     const tv = Collection.itemValue(it);
     const li = document.createElement('li'); li.className='holding-card';
     li.innerHTML = `
-      <div class="hc-top"><span class="hc-name">${esc(card.name||'Unknown')}</span><span class="hc-cond">${esc(cond)} ×${it.qty}</span></div>
+      <div class="hc-top"><span class="hc-thumb">${card.image?`<img src="${card.image}" alt="">`:'🃏'}</span><span class="hc-name">${esc(card.name||'Unknown')}</span><span class="hc-cond">${esc(cond)} ×${it.qty}</span></div>
       <div class="hc-meta">${esc(card.number||'')}${card.set?` · ${esc(card.set)}`:''}</div>
       <div class="hc-val">${uv==null?'<span class="neg">No price recorded</span>':`${money(uv)} ea → <b>${money(tv)}</b>`}</div>
       <div class="hc-actions">
@@ -1362,9 +1417,8 @@ async function syncCloudPricesForCard(key){
 function openCardDetail(key){
   currentCardKey = key;
   const card = Collection.getCard(key) || {};
-  // silently pull any newer cloud prices for this card (single read, no polling) then re-render
-  syncCloudPricesForCard(key);
   $('#cd-name').textContent = card.name || 'Card';
+  const th = $('#cd-thumb'); if (th) th.innerHTML = card.image ? `<img src="${card.image}" alt="">` : '🃏';
   $('#cd-meta').textContent = [card.number, card.set, card.variant, card.rarity, card.language].filter(Boolean).join(' · ');
 
   // raw table
@@ -1473,14 +1527,21 @@ document.body.addEventListener('click', e => {
     },
     'calc': calcFlip,
     'save-card': saveCard,
-    'auto-pull': autoPullPrices,
-    'save-helper': async () => {
-      setHelperUrl($('#helper-url').value);
-      const s = $('#helper-status'); const base = helperUrl();
-      if (!base) { s.textContent = 'Enter an address first.'; return; }
-      s.textContent = 'Testing…';
-      try { const r = await fetch(base + '/ping'); const j = await r.json(); s.textContent = j.ok ? `✓ Connected (${j.queued} queued)` : '⚠ Odd response'; }
-      catch (e) { s.textContent = '✕ Can\u2019t reach helper — check it\u2019s running + same Wi-Fi.'; }
+    'scan-to-business': () => {
+      const name = $('#f-name').value.trim(); const code = $('#f-code').value.trim();
+      if (!name) { alert('Enter a card name first.'); return; }
+      const card = Collection.upsertCard({ name, number: code, set:'', variant:'', language:'EN', image: (state.scan&&state.scan.image)||'' });
+      const it = Collection.addItem(card.key, { condition:'raw', qty:1, valSource:'ebay' });
+      Collection.updateItem(it.id, { status:'in_inventory', acq:{ price:0, shipping:0, tax:0, other:0, date:Collection.today() } });
+      showView('inventory');
+      openInvEditor(it.id);   // open editor so you type the buy price now
+    },
+    'scan-to-collection': () => {
+      const name = $('#f-name').value.trim(); const code = $('#f-code').value.trim();
+      if (!name) { alert('Enter a card name first.'); return; }
+      const card = Collection.upsertCard({ name, number: code, set:'', variant:'', language:'EN', image: (state.scan&&state.scan.image)||'' });
+      currentCardKey = card.key;
+      showView('carddetail');
     },
     'rank-top': rankTop,
     'export-learn': exportCorrections,
@@ -1512,16 +1573,12 @@ document.body.addEventListener('click', e => {
   if (a.dataset.action === 'prod-save') { saveProduct(); return; }
   if (a.dataset.action === 'prod-open') { openProductUnit(a.dataset.id); return; }
   if (a.dataset.action === 'prod-add-pull') { addPullToSession(a.dataset.id); return; }
+  if (a.dataset.action === 'prod-sell-bulk') { sellBulkFromProduct(a.dataset.id); return; }
+  if (a.dataset.action === 'prod-bulk-del') { Products.removeBulkSale(a.dataset.id, a.dataset.sid); renderProducts(); renderInventory(); return; }
   if (a.dataset.action === 'grade-send') { openGradeSend(a.dataset.id); return; }
   if (a.dataset.action === 'grade-complete') { openGradeComplete(a.dataset.id); return; }
   if (a.dataset.action === 'grade-ed-close') { closeGradeEditor(); return; }
   if (a.dataset.action === 'grade-ed-save') { saveGradeEditor(); return; }
-  if (a.dataset.action === 'dash-refresh-all') { refreshAllHeld(); return; }
-  if (a.dataset.action === 'dash-sync-cloud') {
-    const note=$('#dash-refresh-note'); if(note) note.textContent='Syncing prices from cloud…';
-    syncAllCloudPrices().then(n=>{ if(note) note.textContent = n ? `☁️ Synced ${n} card${n===1?'':'s'} from cloud.` : 'Nothing new in the cloud yet.'; renderInventory(); });
-    return;
-  }
   if (a.dataset.action === 'inv-add-open') { toggleAddCardForm(); return; }
   if (a.dataset.action === 'inv-add-save') { saveAddCard(); return; }
   if (a.dataset.action === 'backup-now') { backupNowUI(); return; }
@@ -1536,8 +1593,10 @@ if ($('#inv-search')) $('#inv-search').addEventListener('input', e => { invSearc
   const el = $(id); if (el) el.addEventListener('input', updateInvBasisPreview);
 });
 if ($('#ed-price-mode')) $('#ed-price-mode').addEventListener('change', updateInvBasisPreview);
+if ($('#ed-photo')) $('#ed-photo').addEventListener('change', async e => { if (e.target.files[0]) { _edPhoto = await fileToThumb(e.target.files[0]); const pv=$('#ed-photo-preview'); if(pv) pv.innerHTML = _edPhoto?`<img src="${_edPhoto}" style="width:100%;height:100%;object-fit:cover">`:'🃏'; } e.target.value=''; });
 // product form: live cost-per-unit preview
 ['#pf-qty','#pf-price','#pf-ship','#pf-tax'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateProdPerUnit); });
+if ($('#pf-photo')) $('#pf-photo').addEventListener('change', async e => { if (e.target.files[0]) { _pfPhoto = await fileToThumb(e.target.files[0]); const pv=$('#pf-photo-preview'); if(pv) pv.innerHTML = _pfPhoto?`<img src="${_pfPhoto}" style="width:100%;height:100%;object-fit:cover">`:'📦'; } e.target.value=''; });
 // grading form: live basis preview
 ['#gr-fee','#gr-shipto','#gr-shipback','#gr-ins','#gr-other','#gr-extraship','#gr-extraother'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateGradeBasis); });
 // add-card form: condition toggle + live basis
@@ -1549,6 +1608,7 @@ $('#import-learn').addEventListener('change', e => { if (e.target.files[0]) impo
 $('#col-import').addEventListener('change', e => { if (e.target.files[0]) importCollection(e.target.files[0]); e.target.value = ''; });
 if ($('#backup-restore-file')) $('#backup-restore-file').addEventListener('change', e => { if (e.target.files[0]) restoreBackupFile(e.target.files[0]); e.target.value = ''; });
 if ($('#af-scan')) $('#af-scan').addEventListener('change', e => { if (e.target.files[0]) scanIntoAddCard(e.target.files[0]); e.target.value = ''; });
+if ($('#af-photo')) $('#af-photo').addEventListener('change', async e => { if (e.target.files[0]) { _afPhoto = await fileToThumb(e.target.files[0]); const pv=$('#af-photo-preview'); if(pv) pv.innerHTML = _afPhoto?`<img src="${_afPhoto}" style="width:100%;height:100%;object-fit:cover">`:'🃏'; } e.target.value=''; });
 $('#grader-select').addEventListener('change', renderGradeInputs);
 $('#service-select').addEventListener('change', applyServiceFee);
 
@@ -1572,7 +1632,6 @@ try {
 } catch (e) {}
 
 renderGradeInputs();
-if ($('#helper-url')) $('#helper-url').value = helperUrl();
 showView('scan');
 
 // cosmetic icon splash on open (~1.3s)
