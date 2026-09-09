@@ -28,8 +28,11 @@ const Collection = (() => {
 
   /* ---------- card records (identity) ---------- */
   function cardKey(c){
-    // same physical card -> same key (name|number|set|variant|language)
-    return [c.name, c.number, c.set, c.variant, c.language].map(x => String(x||'').trim().toLowerCase()).join('|');
+    // same physical card -> same key. Identity = NAME + NUMBER only, so the same card
+    // groups together regardless of how it was entered (set/variant are display-only
+    // metadata, NOT part of identity). Distinguish alt-arts by naming them differently
+    // (e.g. "Son Gohan Youth (Alt Art)").
+    return [c.name, c.number].map(x => String(x||'').trim().toLowerCase()).join('|');
   }
   function upsertCard(c){
     const cards = load(K_CARDS, {});
@@ -43,6 +46,50 @@ const Collection = (() => {
   }
   function getCard(key){ return load(K_CARDS, {})[key] || null; }
   function allCards(){ return load(K_CARDS, {}); }
+
+  // ONE-TIME migration: older data used name|number|set|variant|language keys, so the same
+  // card added via different paths (blank vs filled set) split apart. Re-key everything to the
+  // new name+number identity, merging duplicates. Runs once (guarded by a flag).
+  function migrateToNameNumberKeys(){
+    const FLAG = 'dbz.col.migratedV2';
+    if (localStorage.getItem(FLAG)) return;
+    try {
+      const cards = load(K_CARDS, {});
+      const newCards = {};
+      // remap oldKey -> newKey using each card's stored fields
+      const remap = {};
+      Object.values(cards).forEach(c => {
+        const nk = cardKey(c);           // name+number only now
+        remap[c.key] = nk;
+        // merge: first one wins for display fields, but fill blanks from later ones
+        newCards[nk] = { ...(newCards[nk]||{}), ...c, key: nk,
+          image: (newCards[nk] && newCards[nk].image) || c.image || '',
+          set: (newCards[nk] && newCards[nk].set) || c.set || '',
+          variant: (newCards[nk] && newCards[nk].variant) || c.variant || '' };
+      });
+      save(K_CARDS, newCards);
+      // re-point items
+      const its = load(K_ITEMS, []);
+      its.forEach(it => { if (remap[it.cardKey]) it.cardKey = remap[it.cardKey]; });
+      save(K_ITEMS, its);
+      // migrate price history keys (cardKey::source::company::grade)
+      const prices = load(K_PRICES, {});
+      const newPrices = {};
+      Object.keys(prices).forEach(pid => {
+        const idx = pid.indexOf('::');
+        if (idx === -1) { newPrices[pid] = prices[pid]; return; }
+        const oldK = pid.slice(0, idx), rest = pid.slice(idx);
+        const nk = remap[oldK] || oldK;
+        const np = nk + rest;
+        // if two old markets collapse to the same new id, concat their history
+        newPrices[np] = (newPrices[np] || []).concat(prices[pid]);
+      });
+      // sort merged price history by time so latestPrice stays correct
+      Object.keys(newPrices).forEach(k => newPrices[k].sort((a,b)=> (a.t||'').localeCompare(b.t||'')));
+      save(K_PRICES, newPrices);
+      localStorage.setItem(FLAG, '1');
+    } catch (e) { /* if migration fails, leave data as-is (non-destructive) */ }
+  }
 
   // Rename/renumber a card safely: because the key is derived from name|number|set|...,
   // changing them produces a NEW key. We migrate the card record, re-point every owned
@@ -189,8 +236,11 @@ const Collection = (() => {
   function exportAll(){ return { cards:allCards(), items:items(), prices:load(K_PRICES,{}), snapshots:snapshots(), events:events(), settings:settings(), exportedAt:nowISO() }; }
   function importAll(d){ if(d.cards)save(K_CARDS,d.cards); if(d.items)save(K_ITEMS,d.items); if(d.prices)save(K_PRICES,d.prices); if(d.snapshots)save(K_SNAPS,d.snapshots); if(d.events)save(K_EVENTS,d.events); if(d.settings)save(K_SETTINGS,d.settings); }
 
+  // Run the one-time key migration as soon as the module loads.
+  try { migrateToNameNumberKeys(); } catch (e) {}
+
   return {
-    cardKey, upsertCard, getCard, allCards, renameCard,
+    cardKey, upsertCard, getCard, allCards, renameCard, migrateToNameNumberKeys,
     recordPrice, priceHistory, latestPrice, priceId,
     items, addItem, updateItem, removeItem,
     unitValue, itemValue, collectionValue, totalCards,
