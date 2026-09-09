@@ -1,19 +1,4 @@
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1329, in <module>
-    test(
-  File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1276, in test
-    with ServerClass(addr, HandlerClass) as httpd:
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/agentspaces/.127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /index.html HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /app.js HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /cloud.js HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /collection.js HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /inventory.js HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /products.js HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /bridge-export.js HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /styles.css HTTP/1.1" 200 -
-127.0.0.1 - - [09/Sep/2026 00:08:28] "GET /sw.js HTTP/1.1" 200 -
-s)
-OSError: [Errno 98] Address already in use
+127.0.0.1 - - [09/Sep/2026 01:01:55] "GET /index.html HTTP/1.1" 200 -
+127.0.0.1 - - [09/Sep/2026 01:01:55] "GET /app.js HTTP/1.1" 200 -
+127.0.0.1 - - [09/Sep/2026 01:01:55] "GET /inventory.js HTTP/1.1" 200 -
+127.0.0.1 - - [09/Sep/2026 01:01:55] "GET /collection.js HTTP/1.1" 200 -

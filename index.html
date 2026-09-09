@@ -233,6 +233,37 @@
       </div>
       <div class="card-block">
         <div class="sr-title">TCG Inventory</div>
+        <button class="btn-primary block" data-action="inv-add-open">+ Add Card to Inventory</button>
+        <div id="inv-add-form" class="prod-form hidden">
+          <label class="field"><span>Card name</span><input type="text" id="af-name" placeholder="Son Gohan Youth"></label>
+          <div class="cost-row">
+            <label class="field"><span>Card #</span><input type="text" id="af-number" placeholder="FB03-139"></label>
+            <label class="field"><span>Set</span><input type="text" id="af-set" placeholder="FB03"></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Condition</span>
+              <select id="af-cond" class="inv-select"><option value="raw">Raw</option><option value="graded">Graded</option></select>
+            </label>
+            <label class="field"><span>Quantity</span><input type="number" id="af-qty" inputmode="numeric" step="1" placeholder="1"></label>
+          </div>
+          <div class="cost-row" id="af-grade-row" style="display:none">
+            <label class="field"><span>Company</span>
+              <select id="af-company" class="inv-select"><option>PSA</option><option>BGS</option><option>CGC</option><option>SGC</option></select>
+            </label>
+            <label class="field"><span>Grade</span><input type="text" id="af-grade" inputmode="decimal" placeholder="10"></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Purchase price</span><input type="number" id="af-price" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Shipping</span><input type="number" id="af-ship" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Tax</span><input type="number" id="af-tax" inputmode="decimal" step="0.01" placeholder="0"></label>
+            <label class="field"><span>Other</span><input type="number" id="af-other" inputmode="decimal" step="0.01" placeholder="0"></label>
+          </div>
+          <label class="field"><span>Purchase date</span><input type="date" id="af-date"></label>
+          <div id="af-basis" class="inv-ed-basis"></div>
+          <button class="btn-primary block" data-action="inv-add-save">Add to Inventory</button>
+        </div>
         <div class="inv-filter-row">
           <select id="inv-status-filter" class="inv-select">
             <option value="all">All statuses</option>

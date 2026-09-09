@@ -762,6 +762,47 @@ async function copyBridgeData(){
   }
 }
 
+/* ---------- Add card directly to inventory (Business tab) ---------- */
+function toggleAddCardForm(){
+  const f = $('#inv-add-form'); if (!f) return;
+  f.classList.toggle('hidden');
+  if (!f.classList.contains('hidden')) { updateAddCardGradeRow(); updateAddCardBasis(); }
+}
+function updateAddCardGradeRow(){
+  const graded = $('#af-cond').value === 'graded';
+  const row = $('#af-grade-row'); if (row) row.style.display = graded ? '' : 'none';
+}
+function afNum(id){ const v=parseFloat($(id).value); return isFinite(v)?v:0; }
+function updateAddCardBasis(){
+  const probe = { acq:{price:afNum('#af-price'), shipping:afNum('#af-ship'), tax:afNum('#af-tax'), other:afNum('#af-other')}, grading:{} };
+  const basis = Inventory.costBasis(probe);
+  const be = Inventory.breakEven(probe);
+  const el = $('#af-basis');
+  if (el) el.innerHTML = `<div class="inv-sum-row"><span>Cost basis</span><b>${money(basis)}</b></div>`+
+                         `<div class="inv-sum-row"><span>Break-even (after fees)</span><b>${money(be)}</b></div>`;
+}
+function saveAddCard(){
+  const name = $('#af-name').value.trim();
+  if (!name) { alert('Enter a card name.'); return; }
+  const cond = $('#af-cond').value;
+  const card = Collection.upsertCard({ name, number:$('#af-number').value.trim(), set:$('#af-set').value.trim(), variant:'', language:'EN' });
+  const it = Collection.addItem(card.key, {
+    condition: cond,
+    company: cond==='graded' ? $('#af-company').value : null,
+    grade: cond==='graded' ? ($('#af-grade').value.trim()||null) : null,
+    qty: parseInt($('#af-qty').value,10)||1,
+    valSource: 'ebay'
+  });
+  Collection.updateItem(it.id, {
+    acq: { price:afNum('#af-price'), shipping:afNum('#af-ship'), tax:afNum('#af-tax'), other:afNum('#af-other'), date:$('#af-date').value||Collection.today() },
+    status: 'in_inventory'
+  });
+  // reset + hide
+  ['#af-name','#af-number','#af-set','#af-qty','#af-grade','#af-price','#af-ship','#af-tax','#af-other'].forEach(id=>{ if($(id)) $(id).value=''; });
+  $('#inv-add-form').classList.add('hidden');
+  renderInventory();
+}
+
 /* ---------- Business Dashboard (Phase 5, #17) ---------- */
 function renderBizDashboard(){
   if (!window.BridgeExport || !window.BridgeExport.dashboard) return;
@@ -1239,6 +1280,8 @@ document.body.addEventListener('click', e => {
   if (a.dataset.action === 'grade-ed-close') { closeGradeEditor(); return; }
   if (a.dataset.action === 'grade-ed-save') { saveGradeEditor(); return; }
   if (a.dataset.action === 'dash-refresh-all') { refreshAllHeld(); return; }
+  if (a.dataset.action === 'inv-add-open') { toggleAddCardForm(); return; }
+  if (a.dataset.action === 'inv-add-save') { saveAddCard(); return; }
   if (map[a.dataset.action]) map[a.dataset.action]();
 });
 // inventory filter + search
@@ -1252,6 +1295,9 @@ if ($('#inv-search')) $('#inv-search').addEventListener('input', e => { invSearc
 ['#pf-qty','#pf-price','#pf-ship','#pf-tax'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateProdPerUnit); });
 // grading form: live basis preview
 ['#gr-fee','#gr-shipto','#gr-shipback','#gr-ins','#gr-other','#gr-extraship','#gr-extraother'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateGradeBasis); });
+// add-card form: condition toggle + live basis
+if ($('#af-cond')) $('#af-cond').addEventListener('change', updateAddCardGradeRow);
+['#af-price','#af-ship','#af-tax','#af-other'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', updateAddCardBasis); });
 $('#photo-input').addEventListener('change', e => { if (e.target.files[0]) ocrFromFile(e.target.files[0]); e.target.value = ''; });
 $('#import-learn').addEventListener('change', e => { if (e.target.files[0]) importLearning(e.target.files[0]); e.target.value = ''; });
 $('#col-import').addEventListener('change', e => { if (e.target.files[0]) importCollection(e.target.files[0]); e.target.value = ''; });
