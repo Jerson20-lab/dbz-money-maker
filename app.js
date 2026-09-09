@@ -785,12 +785,16 @@ function renderInvItemRow(it){
       </div>
       <div class="inv-item-profit">${profitLine}</div>
       ${table}
-      ${expanded ? `<button class="btn-secondary block inv-edit-btn" data-action="inv-edit" data-id="${it.id}">✎ Edit costs / status / sale</button>`+
+      ${expanded ? (
+        (st!=='sold' && st!=='at_grading'
+          ? `<button class="btn-primary block inv-edit-btn" data-action="inv-sell" data-id="${it.id}">💵 Sell this card</button>`
+          : '')+
+        `<button class="btn-secondary block inv-edit-btn" data-action="inv-edit" data-id="${it.id}">✎ Edit costs / status / sale</button>`+
         (st==='at_grading'
           ? `<button class="btn-primary block inv-edit-btn" data-action="grade-complete" data-id="${it.id}">🏆 Grading returned — enter grade</button>`
           : (st!=='sold'
             ? `<button class="btn-secondary block inv-edit-btn" data-action="grade-send" data-id="${it.id}">📮 Send to Grading</button>`
-            : '')) : ''}
+            : ''))) : ''}
     </div>`;
 }
 
@@ -833,6 +837,29 @@ function openInvEditor(id){
   $('#inv-editor').classList.remove('hidden');
 }
 function closeInvEditor(){ $('#inv-editor').classList.add('hidden'); invEditingId = null; }
+
+// Quick sell directly from the Business dashboard (no need to open the full editor).
+function sellInvItem(id){
+  const it = invFindItem(id); if (!it) return;
+  const name = invItemName(it);
+  const basis = Inventory.costBasis(it);
+  const raw = prompt(`Sell "${name}"\n\nCost basis: ${money(basis)}\nEnter the SALE price (what the buyer paid):`, '');
+  if (raw === null) return;
+  const price = parseFloat(String(raw).replace(/[^0-9.]/g,''));
+  if (!isFinite(price) || price < 0) { alert('Enter a valid sale price.'); return; }
+  const fees = Inventory.feeOn(price);
+  const patch = { status:'sold', sale:{ price, fees, date: Collection.today() } };
+  // lock in allocated pack cost for pulls (so profit uses cost at sale time)
+  if (window.Products && Products.allocatedCostForItem) {
+    const live = Products.allocatedCostForItem(id);
+    if (live > 0) patch.allocLocked = live;
+  }
+  Collection.updateItem(id, patch);
+  const net = Inventory.round2(price - fees);
+  const profit = Inventory.round2(net - basis);
+  renderInventory();
+  alert(`✓ Sold ${name} for ${money(price)}\nFees: ${money(fees)} · Net: ${money(net)}\nProfit: ${money(profit)}`);
+}
 function edNum(id){ const v = parseFloat($(id).value); return isFinite(v) ? v : 0; }
 // Convert the editor's acquisition inputs to PER-UNIT (stored per-unit). Total mode ÷ qty.
 function edPerUnitAcq(){
@@ -1631,6 +1658,7 @@ document.body.addEventListener('click', e => {
   // inventory: expand/collapse a card's min-sell table
   if (a.dataset.action === 'inv-expand') { invExpanded = (invExpanded === a.dataset.id) ? null : a.dataset.id; renderInventory(); return; }
   if (a.dataset.action === 'inv-edit') { openInvEditor(a.dataset.id); return; }
+  if (a.dataset.action === 'inv-sell') { sellInvItem(a.dataset.id); return; }
   if (a.dataset.action === 'inv-ed-close') { closeInvEditor(); return; }
   if (a.dataset.action === 'inv-ed-save') { saveInvEditor(); return; }
   if (a.dataset.action === 'bridge-copy') { copyBridgeData(); return; }
