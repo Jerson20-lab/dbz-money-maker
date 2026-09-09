@@ -465,18 +465,25 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v57';
+    window.APP_VERSION = 'v58';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');
-        // show banner only when we've seen a DIFFERENT version before (not first-ever install)
-        if (seen && seen !== window.APP_VERSION) {
+        // Reliable trigger: the SW sets sessionStorage 'appJustUpdated' right before it reloads
+        // the page on controllerchange (a genuinely new version just took over). Version-diff
+        // is kept as a fallback for cases where controllerchange didn't fire.
+        let justUpdated = false;
+        try { justUpdated = sessionStorage.getItem('appJustUpdated') === '1'; } catch (e) {}
+        const versionChanged = seen && seen !== window.APP_VERSION;
+        if (justUpdated || versionChanged) {
           const b = document.createElement('div');
           b.className = 'update-banner';
           b.innerHTML = '<div class="ub-row"><span>✓ App updated to ' + window.APP_VERSION + '</span><button aria-label="Close">✕</button></div><img class="ub-img" src="update-banner.png" alt="">';
           b.querySelector('button').addEventListener('click', () => b.remove());
           document.body.appendChild(b);
+          setTimeout(() => { if (b.parentNode) b.remove(); }, 8000);
         }
+        try { sessionStorage.removeItem('appJustUpdated'); } catch (e) {}
         localStorage.setItem('dbz.seenVersion', window.APP_VERSION);
       } catch (e) {}
     });
