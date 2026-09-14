@@ -222,7 +222,22 @@ const Scanner = (function () {
       const score = (ex.valid?3:0) + (r.conf/100) + (/^[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?$/.test(ex.normalized)?2:0);
       if (!best || score>best.score) best = { ...ex, score, srcConf:r.conf };
     }
-    return best || { raw:'', normalized:'', valid:false, score:0, srcConf:0 };
+    // --- separate RARITY / STAR pass (allow *, letters — no number-only whitelist) ---
+    // The rarity code + ★ sits near the number. Read the bottom band WITHOUT the
+    // restrictive charset so a star glyph can survive as * / k / x.
+    let rarityText = '';
+    try {
+      const rarOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ*' };
+      const rBand = upscale(crop(card, W*0.55, H*0.86, W*0.45, H*0.14), 4);
+      const rres = await Promise.all([
+        Tesseract.recognize(pxGray(rBand),'eng',rarOpts).catch(()=>({data:{text:''}})),
+        Tesseract.recognize(pxThreshold(rBand,false),'eng',rarOpts).catch(()=>({data:{text:''}}))
+      ]);
+      rarityText = rres.map(r=>(r.data.text||'').trim()).join(' ');
+    } catch(e){}
+    const out = best || { raw:'', normalized:'', valid:false, score:0, srcConf:0 };
+    out.rarityText = rarityText;
+    return out;
   }
 
   /* ---------------- 2. OCR ----------------
@@ -432,14 +447,16 @@ const Scanner = (function () {
     const rarityAlt = ALTART_RARITIES.includes(rar);
     if (rarityAlt && !found.includes('Special/Secret Art')) found.push(rar + ' (special/alt art)');
 
-    // (b) star marker after the rarity, in the band text. OCR of ★ is unreliable, so we
-    // look for a rarity code immediately followed by a star-like glyph.
+    // (b) star marker. OCR of ★ is unreliable, so we accept either:
+    //   - a rarity code immediately followed by a star-like glyph, OR
+    //   - a readable rarity code AND a stray star glyph anywhere in the rarity text.
     let starVariant = false;
     const band = (bandText || allText || '').toUpperCase();
-    // e.g. "SR★", "R ★", "SR*", "SRK", "SR X" right after a known rarity token
     const rarAlt = RARITY_TOKENS.slice().sort((a,b)=>b.length-a.length).join('|');
-    const starRe = new RegExp('(?:' + rarAlt + ')\\s*[\\*\\u2605\\u2606KX]', 'i');
-    if (starRe.test(band)) starVariant = true;
+    const adjacentStar = new RegExp('(?:' + rarAlt + ')\\s*[\\*\\u2605\\u2606KX]', 'i').test(band);
+    const hasRarity = new RegExp('(?:^|[^A-Z])(?:' + rarAlt + ')(?:[^A-Z]|$)').test(band);
+    const hasStarGlyph = /[\*\u2605\u2606]/.test(band);
+    if (adjacentStar || (hasRarity && hasStarGlyph)) starVariant = true;
     if (starVariant && !found.some(f => /star/i.test(f))) found.push('Star (verify 1★/2★)');
 
     if (found.length) {
@@ -553,9 +570,10 @@ const Scanner = (function () {
     if (learnedNum !== number.normalized) {
       number = { raw: number.raw, normalized: learnedNum, valid: true, learned: true };
     }
-    const rarity = extractRarity(raw.band + ' ' + raw.full);
+    const rarityText = (raw.roiNum && raw.roiNum.rarityText) || '';
+    const rarity = extractRarity(rarityText + ' ' + raw.band + ' ' + raw.full);
     const set = extractSet(number.normalized, raw.band);
-    const variant = analyzeVariant(raw.full + ' ' + raw.band, rarity, raw.band);
+    const variant = analyzeVariant(raw.full + ' ' + rarityText, rarity, rarityText);
 
     const scanObj = {
       name:   { raw: nameRawPick, corrected: nameCorrected },
