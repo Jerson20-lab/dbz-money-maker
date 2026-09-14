@@ -48,6 +48,8 @@
         </div>
         <label class="field"><span>Or upload a photo</span><input type="file" id="photo-input" accept="image/*" /></label>
         <p class="hint" style="margin-top:6px">💡 <b>Best results for small card numbers:</b> take the photo with your iPhone's built-in <b>Camera app</b> (it uses the macro lens up close), then tap <b>Upload a photo</b> above. That's sharper than the in-app camera.</p>
+        <button class="btn-secondary block" data-action="load-carddb" style="margin-top:8px">⬇ Load / update card database</button>
+        <p class="hint" id="carddb-status" style="margin-top:4px">Loads all card names/numbers so scans auto-identify. One-time (needs internet), then works offline.</p>
       </div>
 
       <div id="scan-result" class="card-block hidden">
@@ -476,6 +478,8 @@
   <script src="bridge-export.js"></script>
   <script src="products.js"></script>
   <script src="backup.js"></script>
+  <script src="carddb-data.js"></script>
+  <script src="carddb.js"></script>
   <script src="scanner.js"></script>
   <script src="app.js"></script>
   <script>
@@ -499,7 +503,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v70';
+    window.APP_VERSION = 'v74';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

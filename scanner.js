@@ -570,13 +570,28 @@ const Scanner = (function () {
     if (learnedNum !== number.normalized) {
       number = { raw: number.raw, normalized: learnedNum, valid: true, learned: true };
     }
+    // --- CardDB: snap a noisy number to a known card number (fuzzy, offline) ---
+    let dbCard = null;
+    try {
+      if (typeof window !== 'undefined' && window.CardDB && number.normalized) {
+        const m = window.CardDB.bestMatch(number.normalized);
+        if (m) {
+          dbCard = m.card;
+          // correct the number to the known one (e.g. STO1-O66 -> ST01-066)
+          number = { raw: number.raw, normalized: m.card.number, valid: true, dbMatched: true, dbDistance: m.distance };
+        }
+      }
+    } catch (e) {}
     const rarityText = (raw.roiNum && raw.roiNum.rarityText) || '';
-    const rarity = extractRarity(rarityText + ' ' + raw.band + ' ' + raw.full);
-    const set = extractSet(number.normalized, raw.band);
+    const rarity = (dbCard && dbCard.rarity) || extractRarity(rarityText + ' ' + raw.band + ' ' + raw.full);
+    const set = (dbCard && dbCard.set) || extractSet(number.normalized, raw.band);
     const variant = analyzeVariant(raw.full + ' ' + rarityText, rarity, rarityText);
+    // If the DB identified the card, its name/variant are authoritative (OCR name is unreliable).
+    const finalName = (dbCard && dbCard.name) ? dbCard.name : nameCorrected;
+    const finalVariant = (dbCard && dbCard.variant) ? dbCard.variant : variant.variant;
 
     const scanObj = {
-      name:   { raw: nameRawPick, corrected: nameCorrected },
+      name:   { raw: nameRawPick, corrected: finalName },
       number: { raw: number.raw, normalized: number.normalized, valid: number.valid },
       set, rarity, variant,
       _ocrConf: { name: raw._conf.full, number: raw._conf.band, bottom: raw._conf.band },
@@ -587,9 +602,13 @@ const Scanner = (function () {
     const candidates = await matchCandidates(scanObj);
     const top = candidates[0] || null;
     const confidence = confidenceFor(scanObj, top);
+    // DB match is strong evidence — boost overall confidence if we snapped to a known card.
+    if (dbCard) confidence.overall = Math.max(confidence.overall, number.dbDistance === 0 ? 0.97 : 0.9);
 
     return {
       detected: raw.detected,
+      dbMatched: !!dbCard,
+      dbCard: dbCard || null,
       // ---- raw + corrected (never overwrite raw) ----
       rawOcr: scanObj._rawOcr,
       name: scanObj.name.corrected,
@@ -599,7 +618,7 @@ const Scanner = (function () {
       cardNumberValid: scanObj.number.valid,
       set: scanObj.set,
       rarity: scanObj.rarity,
-      variant: scanObj.variant.variant,
+      variant: finalVariant,
       altArt: scanObj.variant.altArt,   // 'Unknown — Verify' when undetectable
       starVariant: scanObj.variant.starVariant,
       // ---- matching ----

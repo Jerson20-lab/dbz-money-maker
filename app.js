@@ -224,6 +224,21 @@ function cropCanvas(src, x, y, w, h) {
   return c;
 }
 
+// Fetch + load the full card database from the user's device (one-time, then offline).
+async function loadCardDbUI(){
+  if (!window.CardDB || !CardDB.fetchAndLoad) { alert('Card DB module not loaded.'); return; }
+  const st = $('#carddb-status');
+  const set = m => { if (st) st.textContent = m; };
+  set('Loading card database… (needs internet this one time)');
+  try {
+    const n = await CardDB.fetchAndLoad(set);
+    if (n > 0) set(`✓ Loaded ${n} cards. Scanner can now identify cards by number — works offline.`);
+    else set('⚠ Could not load (the card API may block browser requests). Your scanned cards still self-learn.');
+  } catch (e) {
+    set('⚠ Load failed: ' + e.message + '. Self-learning still works.');
+  }
+}
+
 // Open the verification screen, pre-filled from the scanner result (or the edited fields).
 function openVerifyScreen(){
   const r = state.scanResult || {};
@@ -271,6 +286,10 @@ function confirmVerifiedCard(dest){
       if (r.nameRaw && name)         Scanner.learnCorrection('name', r.nameRaw, name);
     } catch (e) {}
   }
+  // --- card knowledge base: remember number -> {name,set,rarity,variant} ---
+  if (number && window.CardDB) {
+    try { CardDB.learn(number, { name, set, rarity, variant }); } catch (e) {}
+  }
   const image = (state.scan && state.scan.image) || (r && r.image) || '';
   const qty = Math.max(1, parseInt(($('#verify-qty') && $('#verify-qty').value) || '1', 10) || 1);
   // EXISTING inventory path — do not change cost/accounting logic
@@ -313,6 +332,9 @@ function renderScanResult(r){
   const conf = c => `<span class="sc-conf sc-${c>=0.8?'hi':c>=0.5?'mid':'lo'}">${pct(c)}</span>`;
   const flag = v => v ? escapeHtmlSafe(v) : '<span class="sc-verify">Unknown — Verify</span>';
   let html = `<div class="sc-box">`;
+  if (r.dbMatched) {
+    html += `<div class="sc-match sc-match-ok">✓ Known card (from your card database): <b>${escapeHtmlSafe((r.dbCard&&r.dbCard.name)||r.name)}</b> ${escapeHtmlSafe(r.cardNumber)}</div>`;
+  }
   html += `<div class="sc-row"><span>Overall confidence</span>${conf(r.confidence.overall)}</div>`;
   html += `<div class="sc-grid">`;
   html += `<div class="sc-cell"><div class="sc-lbl">Name ${conf(r.confidence.name)}</div><div>${flag(r.name)}</div></div>`;
@@ -1799,6 +1821,7 @@ document.body.addEventListener('click', e => {
       if (state.scan) { state.scan.name = card.name || ''; state.scan.code = card.number || ''; }
     },
     'open-verify': () => openVerifyScreen(),
+    'load-carddb': () => loadCardDbUI(),
     'verify-close': () => { $('#verify-screen').classList.add('hidden'); },
     'verify-confirm-business': () => confirmVerifiedCard('business'),
     'verify-confirm-collection': () => confirmVerifiedCard('collection'),
