@@ -1,8 +1,10 @@
 Traceback (most recent call last):
-  File "<frozen runpy>", line 198, 127.0.0.1 - - [14/Sep/2026 05:46:41] "GET /index.html HTTP/1.1" 200 -
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
   File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1329, in <module>
     test(
-  File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1276, in test
+  File "/age127.0.0.1 - - [14/Sep/2026 05:54:36] "GET /index.html HTTP/1.1" 200 -
+/server.py", line 1276, in test
     with ServerClass(addr, HandlerClass) as httpd:
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/socketserver.py", line 457, in __init__

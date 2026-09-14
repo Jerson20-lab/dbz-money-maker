@@ -336,6 +336,43 @@ function verifyPickCard(el){
   renderVerifyList(); renderVerifyBadge(); renderInventory();
 }
 
+// ---- Image diagnostic: reports why card images may not be loading ----
+function runImageDiag(){
+  const out = $('#img-diag-out'); if (!out) return;
+  const L = [];
+  L.push('=== IMAGE DIAGNOSTIC ===');
+  L.push('app version: ' + (window.APP_VERSION||'?'));
+  L.push('CardDB loaded: ' + (window.CardDB ? 'yes' : 'NO') + ' · count: ' + (window.CardDB && CardDB.count ? CardDB.count() : 'n/a'));
+  L.push('online: ' + (navigator.onLine ? 'yes' : 'NO'));
+  L.push('service worker: ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'active' : 'none'));
+  // sample cards from YOUR inventory (up to 3) + one known test card
+  const owned = (window.Collection && Collection.allCards) ? Object.values(Collection.allCards()||{}) : [];
+  const samples = [];
+  owned.slice(0,3).forEach(c => samples.push({ label:'owned', number:c.number, name:c.name, hasImg:!!c.image }));
+  samples.push({ label:'test', number:'FB05-054', name:'Son Gohan: Youth', hasImg:false });
+  L.push('owned cards: ' + owned.length + ' · with a number: ' + owned.filter(c=>c.number).length);
+  out.textContent = L.join('\n') + '\n\nTesting image URLs…';
+  // test each sample URL by actually trying to load it
+  let pending = 0;
+  const results = [];
+  samples.forEach((s, i) => {
+    if (!s.number) { results[i] = `  [${s.label}] "${s.name||'?'}" — NO NUMBER (can't build URL)`; return; }
+    const url = (window.CardDB && CardDB.imageUrl) ? CardDB.imageUrl(s.number) : '';
+    if (!url) { results[i] = `  [${s.label}] ${s.number} — no URL built`; return; }
+    pending++;
+    const img = new Image();
+    const t0 = Date.now();
+    const finish = (status) => { results[i] = `  [${s.label}] ${s.number} → ${status} (${Date.now()-t0}ms)\n      ${url}`; pending--; if (pending<=0) render(); };
+    img.onload = () => finish('✓ LOADED ' + img.naturalWidth + 'x' + img.naturalHeight);
+    img.onerror = () => finish('✕ FAILED (blocked/404)');
+    setTimeout(() => { if (results[i]===undefined) finish('⏳ TIMED OUT (host hung)'); }, 6000);
+    img.src = url;
+  });
+  function render(){ out.textContent = L.join('\n') + '\n\n' + results.filter(Boolean).join('\n') + '\n\n(screenshot this and send it)'; }
+  if (pending===0) render();
+  else out.textContent = L.join('\n') + '\n\nTesting ' + pending + ' image URL(s)… wait ~6s';
+}
+
 // Open the verification screen, pre-filled from the scanner result (or the edited fields).
 function openVerifyScreen(){
   const r = state.scanResult || {};
@@ -929,15 +966,22 @@ function invItemCard(it){ return Collection.getCard(it.cardKey) || {}; }
 // from the DB URL (works even if we can't cache it); else the placeholder.
 // ---- Image loading progress bar (top) ----
 const _imgProg = { total: 0, done: 0 };
+let _imgProgSafety = null;
 function imgProgStart(){
   _imgProg.total++;
   const bar = $('#img-progress'); if (bar) bar.classList.remove('hidden');
   imgProgPaint();
+  // Overall safety net: if the whole batch isn't done within 8s, force-complete
+  // (some image hosts hang without firing load/error — don't let the bar stick).
+  if (_imgProgSafety) clearTimeout(_imgProgSafety);
+  _imgProgSafety = setTimeout(()=>{ _imgProg.done = _imgProg.total; imgProgPaint();
+    const b=$('#img-progress'); if(b) b.classList.add('hidden'); _imgProg.total=0; _imgProg.done=0; }, 8000);
 }
 function imgProgDone(){
   _imgProg.done++;
   imgProgPaint();
   if (_imgProg.done >= _imgProg.total) {
+    if (_imgProgSafety) { clearTimeout(_imgProgSafety); _imgProgSafety = null; }
     setTimeout(()=>{ const bar=$('#img-progress'); if (bar && _imgProg.done>=_imgProg.total){ bar.classList.add('hidden'); _imgProg.total=0; _imgProg.done=0; } }, 400);
   }
 }
@@ -1039,6 +1083,19 @@ function renderInventory(){
       }
     }
   } catch(e){}
+
+  // Per-image watchdog: any official image still not loaded after 7s is treated as
+  // failed → swap to placeholder + count it done (so the progress bar can't hang).
+  setTimeout(()=>{
+    try {
+      document.querySelectorAll('.inv-thumb img[data-zoom^="http"]').forEach(img=>{
+        if (!img.complete || img.naturalWidth === 0) {
+          try { if (typeof imgProgDone==='function') imgProgDone(); } catch(e){}
+          img.replaceWith(document.createTextNode('🃏'));
+        }
+      });
+    } catch(e){}
+  }, 7000);
 }
 
 // Group items into stacks: same card + condition + grade-company + grade + status.
@@ -2014,6 +2071,7 @@ document.body.addEventListener('click', e => {
     'verify-list-close': () => { $('#verify-list-screen').classList.add('hidden'); },
     'verify-pick': (el) => verifyPickCard(el),
     'load-carddb': () => loadCardDbUI(),
+    'img-diag': () => runImageDiag(),
     'verify-close': () => { $('#verify-screen').classList.add('hidden'); },
     'verify-confirm-business': () => confirmVerifiedCard('business'),
     'verify-confirm-collection': () => confirmVerifiedCard('collection'),

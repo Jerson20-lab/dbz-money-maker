@@ -320,3 +320,7 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 /* ---- Top image-loading progress bar ---- */
 .img-progress{position:fixed;top:0;left:0;right:0;height:3px;z-index:700;background:rgba(255,90,70,.15)}
 .img-progress-fill{height:100%;width:0;background:#3fb950;transition:width .25s ease}
+
+/* ---- Image diagnostic output ---- */
+.img-diag-out{white-space:pre-wrap;word-break:break-all;font-size:11px;color:#c9d1d9;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:8px;margin:6px 0;max-height:300px;overflow:auto}
+.img-diag-out:empty{display:none}

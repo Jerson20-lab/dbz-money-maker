@@ -294,6 +294,8 @@
       <div class="card-block">
         <div class="sr-title">🗂️ Your Cards</div>
         <p class="hint" style="margin-top:0">Tap a card to expand it, then Sell, set cost basis, or send to grading. Identical cards stack — expand to act on each copy.</p>
+        <button class="btn-secondary block" data-action="img-diag">🩺 Run image diagnostic</button>
+        <pre id="img-diag-out" class="img-diag-out"></pre>
         <div id="inv-list" class="inv-list"></div>
       </div>
     </section>
@@ -524,7 +526,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v8.3';
+    window.APP_VERSION = 'v8.6';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

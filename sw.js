@@ -1,5 +1,5 @@
 /* DBZ Money Maker service worker — network-first app shell, auto-updating */
-const CACHE = 'dbz-v8.3';
+const CACHE = 'dbz-v8.6';
 const ASSETS = ['./','./index.html','./styles.css','./app.js','./collection.js','./inventory.js','./bridge-export.js','./products.js','./backup.js','./carddb-data.js','./carddb.js','./scanner.js','./manifest.json','./icon-192.png','./icon-512.png','./update-banner.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
@@ -11,6 +11,9 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   // Never intercept eBay or cross-origin CDN navigations we open in a new tab
   if (url.hostname.includes('ebay.')) return;
+  // Let cross-origin CARD IMAGES go straight to the network (don't cache opaque responses,
+  // which can fail and break the image). DeckPlanet image hosts + any non-local image.
+  if (url.origin !== location.origin && /\.(png|jpg|jpeg|webp)$/i.test(url.pathname)) return;
   // Local app shell AND icons: network-first so code + icon changes show immediately
   const isLocalShellOrIcon = url.origin === location.origin && /\.(html|css|js|png|json)$|\/$/.test(url.pathname);
   if (isLocalShellOrIcon) {
