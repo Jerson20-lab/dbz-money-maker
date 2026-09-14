@@ -339,6 +339,25 @@ function verifyPickCard(el){
   renderVerifyList(); renderVerifyBadge(); renderInventory();
 }
 
+// ---- TEST: seed 5 real cards (for image testing) ----
+function seedTestCards(){
+  if (!window.Collection) return;
+  const tests = [
+    { name:'Son Gohan: Youth', number:'FB05-054', set:'FB05', rarity:'SR' },
+    { name:'King Cold', number:'FB05-073', set:'FB05', rarity:'R' },
+    { name:'Son Gohan: Childhood', number:'SB02-008', set:'SB02', rarity:'SR' },
+    { name:'Vegeta', number:'ST01-053', set:'ST01', rarity:'C' },
+    { name:'SSG Trunks, Power Awakened', number:'BT16-107', set:'BT16', rarity:'SR' }
+  ];
+  tests.forEach(t => {
+    const card = Collection.upsertCard({ name:t.name, number:t.number, set:t.set, rarity:t.rarity, language:'EN', dbVerified:true });
+    const it = Collection.addItem(card.key, { condition:'raw', qty:1, valSource:'ebay' });
+    Collection.updateItem(it.id, { status:'in_inventory', acq:{ price:1, shipping:0, tax:0, other:0, date:Collection.today() } });
+  });
+  renderInventory();
+  alert('Added 5 test cards with real numbers. Check the Inventory tab for their images.');
+}
+
 // ---- Image diagnostic: reports why card images may not be loading ----
 function runImageDiag(){
   const out = $('#img-diag-out'); if (!out) return;
@@ -378,9 +397,33 @@ function runImageDiag(){
     setTimeout(() => { if (results[i]===undefined) finish('⏳ TIMED OUT (host hung)'); }, 6000);
     img.src = url;
   });
-  function render(){ out.textContent = L.join('\n') + '\n\n' + results.filter(Boolean).join('\n') + '\n\n(screenshot this and send it)'; }
+  function render(){ out.textContent = L.join('\n') + '\n\n' + results.filter(Boolean).join('\n') + domReport() + '\n\n(screenshot this and send it)'; }
   if (pending===0) render();
   else out.textContent = L.join('\n') + '\n\nTesting ' + pending + ' image URL(s)… wait ~6s';
+}
+// Inspect the ACTUAL rendered inventory DOM on the device.
+function domReport(){
+  try {
+    const thumbs = document.querySelectorAll('#inv-list .inv-thumb');
+    const imgs = document.querySelectorAll('#inv-list .inv-thumb img');
+    let r = '\n\n--- LIVE DOM (rendered inventory) ---';
+    r += '\n.inv-thumb containers: ' + thumbs.length;
+    r += '\n.inv-thumb <img> tags: ' + imgs.length;
+    if (imgs.length) {
+      const im = imgs[0];
+      const cs = getComputedStyle(im);
+      const box = im.getBoundingClientRect();
+      r += '\nfirst img src: ' + (im.getAttribute('src')||'').slice(0,60);
+      r += '\nfirst img complete: ' + im.complete + ' · naturalW: ' + im.naturalWidth;
+      r += '\nfirst img display: ' + cs.display + ' · visibility: ' + cs.visibility + ' · opacity: ' + cs.opacity;
+      r += '\nfirst img box: ' + Math.round(box.width) + 'x' + Math.round(box.height);
+      const tcs = getComputedStyle(thumbs[0]);
+      r += '\nthumb container display: ' + tcs.display + ' · size: ' + Math.round(thumbs[0].getBoundingClientRect().width)+'x'+Math.round(thumbs[0].getBoundingClientRect().height);
+    } else if (thumbs.length) {
+      r += '\nfirst thumb innerHTML: ' + (thumbs[0].innerHTML||'').slice(0,80);
+    }
+    return r;
+  } catch(e){ return '\n\nDOM report error: ' + e.message; }
 }
 
 // Open the verification screen, pre-filled from the scanner result (or the edited fields).
@@ -2087,7 +2130,6 @@ document.body.addEventListener('click', e => {
     'verify-list-close': () => { $('#verify-list-screen').classList.add('hidden'); },
     'verify-pick': (el) => verifyPickCard(el),
     'load-carddb': () => loadCardDbUI(),
-    'img-diag': () => runImageDiag(),
     'verify-close': () => { $('#verify-screen').classList.add('hidden'); },
     'verify-confirm-business': () => confirmVerifiedCard('business'),
     'verify-confirm-collection': () => confirmVerifiedCard('collection'),
