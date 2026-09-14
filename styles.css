@@ -258,9 +258,9 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 #cd-chart{height:160px!important;max-height:160px!important;}
 
 /* ---- Card thumbnails ---- */
-.inv-thumb{width:44px;height:60px;flex:0 0 auto;border-radius:6px;overflow:hidden;background:#0f0404;display:flex;align-items:center;justify-content:center;font-size:22px;margin-right:10px;}
-.inv-thumb img{width:100%;height:100%;object-fit:cover;}
-.inv-item-head{display:flex;align-items:center;gap:0;}
+.inv-thumb{width:70px;height:98px;flex:0 0 auto;border-radius:6px;overflow:hidden;background:#0f0404;display:flex;align-items:center;justify-content:center;font-size:26px;margin-right:10px;border:1px solid rgba(255,90,70,.35);}
+.inv-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.inv-item-head{align-items:center;}
 .cd-thumb{width:70px;height:98px;border-radius:8px;overflow:hidden;background:#0f0404;display:flex;align-items:center;justify-content:center;font-size:34px;flex:0 0 auto;}
 .cd-thumb img{width:100%;height:100%;object-fit:cover;}
 .cd-head{display:flex;align-items:center;gap:12px;}
