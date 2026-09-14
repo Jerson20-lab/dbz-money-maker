@@ -59,11 +59,11 @@
 
       <div id="scan-result" class="card-block hidden">
         <div class="sr-title">Add this card</div>
+        <div id="scan-ident"></div>
         <label class="field"><span>Card name</span><input type="text" id="f-name" placeholder="e.g. Kakarot the One and Only" /></label>
         <label class="field"><span>Card code / number</span><input type="text" id="f-code" placeholder="e.g. BT1-001" /></label>
-        <p class="hint">OCR isn't perfect — fix anything it misread first.</p>
-        <button class="btn-primary block" data-action="scan-to-business">📦 Add to Business (inventory)</button>
-        <button class="btn-secondary block" data-action="scan-to-collection" style="margin-top:8px">📈 Add to Collection</button>
+        <p class="hint">OCR isn't perfect — the scanner flags anything low-confidence as "Verify". Fix anything it misread before adding.</p>
+        <button class="btn-primary block" data-action="open-verify">✓ Verify &amp; add this card</button>
       </div>
 
     </section>
@@ -434,6 +434,41 @@
       </div>
     </div>
 
+    <!-- Scan verification screen -->
+    <div id="verify-screen" class="inv-editor-overlay hidden">
+      <div class="inv-editor-sheet">
+        <div class="inv-editor-head">
+          <div class="inv-editor-title">Verify scanned card</div>
+          <button class="inv-ed-close" data-action="verify-close" aria-label="Close">✕</button>
+        </div>
+        <div class="inv-editor-body">
+          <div id="verify-ident"></div>
+          <div class="inv-ed-group-title">Confirm / correct</div>
+          <div style="display:flex;align-items:center;gap:10px;margin:6px 0">
+            <div class="cd-thumb" id="verify-thumb" style="width:44px;height:60px;font-size:22px">🃏</div>
+            <div class="hint" style="flex:1;margin:0">Fix anything the scanner flagged, then confirm.</div>
+          </div>
+          <label class="field"><span>Card name</span><input type="text" id="verify-name" placeholder="Card name" /></label>
+          <div class="cost-row">
+            <label class="field"><span>Card # (primary ID)</span><input type="text" id="verify-number" placeholder="BT1-001" /></label>
+            <label class="field"><span>Set</span><input type="text" id="verify-set" placeholder="BT1" /></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Rarity</span><input type="text" id="verify-rarity" placeholder="SR" /></label>
+            <label class="field"><span>Variant</span><input type="text" id="verify-variant" placeholder="e.g. Alternate Art" /></label>
+          </div>
+          <div class="cost-row">
+            <label class="field"><span>Language</span><input type="text" id="verify-language" placeholder="EN" /></label>
+            <label class="field"><span>Quantity</span><input type="number" id="verify-qty" inputmode="numeric" step="1" min="1" placeholder="1" value="1" /></label>
+          </div>
+        </div>
+        <div class="inv-editor-foot">
+          <button class="btn-primary block" data-action="verify-confirm-business">📦 Confirm → Add to Business</button>
+          <button class="btn-secondary block" data-action="verify-confirm-collection" style="margin-top:8px">📈 Confirm → Add to Collection</button>
+        </div>
+      </div>
+    </div>
+
     <!-- nav -->
     <nav class="tabbar">
       <button class="tab active" data-view="scan"><span class="tico">📷</span><span>Scan</span></button>
@@ -450,6 +485,7 @@
   <script src="bridge-export.js"></script>
   <script src="products.js"></script>
   <script src="backup.js"></script>
+  <script src="scanner.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) window.addEventListener('load', () => {
@@ -472,7 +508,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v61';
+    window.APP_VERSION = 'v64';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

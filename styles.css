@@ -282,3 +282,23 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 
 /* ---- Business tab: pull rows under a session ---- */
 .prod-pull-row{font-size:12px;color:#c9d1d9;padding:2px 0 2px 18px}
+
+/* ---- Scanner identification result ---- */
+.sc-box{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:10px;margin-bottom:10px;font-size:13px}
+.sc-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-weight:600}
+.sc-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.sc-cell{background:#0d1117;border-radius:8px;padding:6px 8px}
+.sc-lbl{font-size:11px;color:#8b949e;display:flex;justify-content:space-between;gap:6px;margin-bottom:2px}
+.sc-conf{font-size:11px;padding:0 6px;border-radius:8px}
+.sc-hi{background:#193c2a;color:#3fb950}.sc-mid{background:#3d3419;color:#d29922}.sc-lo{background:#3d1e1a;color:#ff5a4d}
+.sc-verify{color:#d29922;font-style:italic}
+.sc-match{padding:7px 9px;border-radius:8px;margin:6px 0;font-size:12px}
+.sc-match-ok{background:#193c2a;color:#c9f7d4}.sc-match-verify{background:#3d3419;color:#f5e6b8}
+.sc-alts{font-size:12px;color:#8b949e;margin:6px 0 4px}
+.sc-alt-btn{font-size:12px;padding:6px}
+.sc-raw{margin-top:8px;font-size:11px;color:#8b949e}
+.sc-raw pre{white-space:pre-wrap;word-break:break-word;background:#0d1117;padding:6px;border-radius:6px;margin:4px 0 0}
+
+/* ---- Quick sell button on collapsed inventory row ---- */
+.inv-quick-sell{margin-top:4px;background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.inv-quick-sell:active{background:#1858c4}

@@ -57,7 +57,8 @@ const Inventory = (() => {
     const g = item.grading || {};
     const qty = item.qty || 1;
     const grd = n(g.fee) + n(g.shipTo) + n(g.shipBack) + n(g.insurance) + n(g.other);
-    const alloc = (item.id && window.Products && window.Products.allocatedCostForItem) ? window.Products.allocatedCostForItem(item.id) : 0;
+    const allocPer = (item.id && window.Products && window.Products.allocatedCostForItem) ? window.Products.allocatedCostForItem(item.id) : 0;
+    const alloc = allocPer * qty;  // allocatedCostForItem is PER CARD; a qty-N pull carries N shares
     const isPull = !!(item.sourceSessionId) || (window.Products && window.Products.sourceOfItem && window.Products.sourceOfItem(item.id));
     const acq = isPull ? 0 : (n(a.price) + n(a.shipping) + n(a.tax) + n(a.other)) * qty;
     return round2(acq + grd + alloc);

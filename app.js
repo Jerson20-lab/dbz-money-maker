@@ -166,26 +166,25 @@ function fileToThumb(file){
 }
 async function runOcr(canvas) {
   if (typeof Tesseract === 'undefined') { ocrStatus('OCR engine still loading — try again in a second.', true); return; }
+  if (typeof Scanner === 'undefined') { ocrStatus('Scanner module not loaded — refresh and try again.', true); return; }
   ocrStatus('Reading card…');
   showLoader('Reading card…');
   // capture a thumbnail of the scanned card so it can be saved as the card's image
   state.scan = state.scan || {};
-  state.scan.image = makeThumb(canvas);
-  const W = canvas.width, H = canvas.height;
-  const nameRegion = cropCanvas(canvas, 0, 0, W, Math.round(H * 0.18));            // top strip
-  const codeRegion = cropCanvas(canvas, Math.round(W * 0.55), Math.round(H * 0.82), Math.round(W * 0.45), Math.round(H * 0.18)); // bottom-right
+  const thumb = makeThumb(canvas);
   try {
-    const [nameRes, codeRes] = await Promise.all([
-      Tesseract.recognize(nameRegion, 'eng'),
-      Tesseract.recognize(codeRegion, 'eng')
-    ]);
-    const name = cleanName(nameRes.data.text);
-    const code = cleanCode(codeRes.data.text);
-    state.scan = { name, code };
-    $('#f-name').value = name;
-    $('#f-code').value = code;
+    const result = await Scanner.scan(canvas);
+    result.image = thumb;
+    // Preserve the FULL structured scan result (raw OCR included) for verification.
+    state.scanResult = result;
+    // Back-compat: keep the simple fields the rest of the app already uses.
+    state.scan = { name: result.name, code: result.cardNumber, image: thumb };
+    // Fill the editable fields (user can fix misreads before adding).
+    $('#f-name').value = result.name || '';
+    $('#f-code').value = result.cardNumber || '';
+    renderScanResult(result);
     $('#scan-result').classList.remove('hidden');
-    ocrStatus('Done — check the text below and fix any misreads.');
+    ocrStatus('Done — review the identification below and fix anything before adding.');
     stopCam(); $('#cam-wrap').classList.add('hidden'); $('#capture-btn').classList.add('hidden');
   } catch (e) {
     ocrStatus('Could not read the card. Try better lighting or type it in manually below.', true);
@@ -194,6 +193,120 @@ async function runOcr(canvas) {
     hideLoader();
   }
 }
+function cropCanvas(src, x, y, w, h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(src, x, y, w, h, 0, 0, w, h);
+  return c;
+}
+
+// Open the verification screen, pre-filled from the scanner result (or the edited fields).
+function openVerifyScreen(){
+  const r = state.scanResult || {};
+  // start from the (possibly user-edited) quick fields, fall back to scan result
+  const name = ($('#f-name') && $('#f-name').value.trim()) || r.name || '';
+  const number = ($('#f-code') && $('#f-code').value.trim()) || r.cardNumber || '';
+  if ($('#verify-name'))     $('#verify-name').value = name;
+  if ($('#verify-number'))   $('#verify-number').value = number;
+  if ($('#verify-set'))      $('#verify-set').value = r.set || '';
+  if ($('#verify-rarity'))   $('#verify-rarity').value = r.rarity || '';
+  if ($('#verify-variant'))  $('#verify-variant').value = (r.variant || '');
+  if ($('#verify-language')) $('#verify-language').value = 'EN';
+  if ($('#verify-qty')) $('#verify-qty').value = '1';
+  const thumb = (state.scan && state.scan.image) || (r.image) || '';
+  if ($('#verify-thumb')) $('#verify-thumb').innerHTML = thumb ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:cover">` : '🃏';
+  // reuse the identification panel at the top of the verify sheet
+  const idEl = $('#verify-ident');
+  if (idEl && r.rawOcr) { const tmp = $('#scan-ident'); renderScanResult(r); if (tmp) idEl.innerHTML = tmp.innerHTML; }
+  else if (idEl) idEl.innerHTML = '';
+  $('#verify-screen').classList.remove('hidden');
+}
+
+// Confirm the verified card: record OCR corrections (learning), then commit via the
+// EXISTING inventory path (upsertCard/addItem) — financial logic untouched.
+function confirmVerifiedCard(dest){
+  const name = ($('#verify-name').value || '').trim();
+  const number = ($('#verify-number').value || '').trim();
+  if (!name) { alert('Enter a card name.'); return; }
+  const set = ($('#verify-set').value || '').trim();
+  const rarity = ($('#verify-rarity').value || '').trim();
+  const variant = ($('#verify-variant').value || '').trim();
+  const language = ($('#verify-language').value || 'EN').trim() || 'EN';
+  // --- error learning: compare raw OCR to the confirmed values ---
+  const r = state.scanResult;
+  if (r && window.Scanner) {
+    try {
+      if (r.cardNumberRaw && number) Scanner.learnCorrection('number', r.cardNumberRaw, number);
+      if (r.nameRaw && name)         Scanner.learnCorrection('name', r.nameRaw, name);
+    } catch (e) {}
+  }
+  const image = (state.scan && state.scan.image) || (r && r.image) || '';
+  const qty = Math.max(1, parseInt(($('#verify-qty') && $('#verify-qty').value) || '1', 10) || 1);
+  // EXISTING inventory path — do not change cost/accounting logic
+  const card = Collection.upsertCard({ name, number, set, variant, rarity, language, image });
+  $('#verify-screen').classList.add('hidden');
+  $('#scan-result').classList.add('hidden');
+  if (dest === 'collection') {
+    const it = Collection.addItem(card.key, { condition:'raw', qty });
+    currentCardKey = card.key;
+    showView('carddetail');
+  } else {
+    const it = Collection.addItem(card.key, { condition:'raw', qty, valSource:'ebay' });
+    Collection.updateItem(it.id, { status:'in_inventory', acq:{ price:0, shipping:0, tax:0, other:0, date:Collection.today() } });
+    // Rapid rip loop: offer to scan the next card immediately.
+    if (confirm(`✓ Added ${qty>1?qty+'× ':''}${name}.\n\nScan another card?`)) {
+      resetScanForNext();
+      showView('scan');
+    } else {
+      showView('inventory');
+      openInvEditor(it.id);
+    }
+  }
+}
+
+// Clear scan state so the next scan starts fresh (rip-loop helper).
+function resetScanForNext(){
+  state.scan = {};
+  state.scanResult = null;
+  if ($('#f-name')) $('#f-name').value = '';
+  if ($('#f-code')) $('#f-code').value = '';
+  if ($('#scan-ident')) $('#scan-ident').innerHTML = '';
+  if ($('#scan-result')) $('#scan-result').classList.add('hidden');
+  const os = $('#ocr-status'); if (os) { os.classList.add('hidden'); os.textContent = ''; }
+}
+
+// Render the structured scanner identification into #scan-ident (verification prep).
+function renderScanResult(r){
+  const el = $('#scan-ident'); if (!el) return;
+  const pct = x => Math.round((x||0)*100) + '%';
+  const conf = c => `<span class="sc-conf sc-${c>=0.8?'hi':c>=0.5?'mid':'lo'}">${pct(c)}</span>`;
+  const flag = v => v ? escapeHtmlSafe(v) : '<span class="sc-verify">Unknown — Verify</span>';
+  let html = `<div class="sc-box">`;
+  html += `<div class="sc-row"><span>Overall confidence</span>${conf(r.confidence.overall)}</div>`;
+  html += `<div class="sc-grid">`;
+  html += `<div class="sc-cell"><div class="sc-lbl">Name ${conf(r.confidence.name)}</div><div>${flag(r.name)}</div></div>`;
+  html += `<div class="sc-cell"><div class="sc-lbl">Card # ${conf(r.confidence.number)}</div><div>${flag(r.cardNumber)}${r.cardNumber&&!r.cardNumberValid?' <span class="sc-verify">?</span>':''}</div></div>`;
+  html += `<div class="sc-cell"><div class="sc-lbl">Set ${conf(r.confidence.set)}</div><div>${flag(r.set)}</div></div>`;
+  html += `<div class="sc-cell"><div class="sc-lbl">Rarity ${conf(r.confidence.rarity)}</div><div>${flag(r.rarity)}</div></div>`;
+  html += `<div class="sc-cell"><div class="sc-lbl">Variant ${conf(r.confidence.variant)}</div><div>${r.variant?escapeHtmlSafe(r.variant):('<span class="sc-verify">'+escapeHtmlSafe(r.altArt||'Unknown — Verify')+'</span>')}</div></div>`;
+  html += `</div>`;
+  // match / alternatives
+  if (r.match) {
+    html += `<div class="sc-match ${r.needsVerification?'sc-match-verify':'sc-match-ok'}">${r.needsVerification?'⚠️ Best guess':'✓ Matched'}: <b>${escapeHtmlSafe(r.match.name)}</b> ${escapeHtmlSafe(r.match.number||'')} <span class="muted">(${r.matchWhy.join(', ')})</span></div>`;
+  } else {
+    html += `<div class="sc-match sc-match-verify">No match in your cards — this looks new. Verify the details, then add it.</div>`;
+  }
+  if (r.alternativeMatches && r.alternativeMatches.length) {
+    html += `<div class="sc-alts">Other possible matches:</div>`;
+    r.alternativeMatches.forEach((a,i)=>{
+      html += `<button class="btn-secondary block sc-alt-btn" data-action="scan-pick-alt" data-idx="${i}">${escapeHtmlSafe(a.card.name)} ${escapeHtmlSafe(a.card.number||'')}</button>`;
+    });
+  }
+  // raw OCR (collapsed, for transparency — never overwritten)
+  html += `<details class="sc-raw"><summary>Raw OCR (unedited)</summary><pre>name: ${escapeHtmlSafe(r.rawOcr.name)}\nnumber: ${escapeHtmlSafe(r.rawOcr.number)}\nbottom: ${escapeHtmlSafe(r.rawOcr.bottom)}</pre></details>`;
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
 function cropCanvas(src, x, y, w, h) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   c.getContext('2d').drawImage(src, x, y, w, h, 0, 0, w, h);
@@ -781,6 +894,8 @@ function renderInvItemRow(it, forceExpanded){
         <div class="inv-item-nums">
           <div class="inv-basis">Basis ${money(basis)}</div>
           <div class="inv-be">Break-even ${money(be)}</div>
+          ${(!forceExpanded && st!=='sold' && st!=='at_grading')
+            ? `<button class="inv-quick-sell" data-action="inv-sell" data-id="${it.id}" title="Sell">💵 Sell</button>` : ''}
         </div>
       </div>
       <div class="inv-item-profit">${profitLine}</div>
@@ -970,8 +1085,16 @@ async function publishHeldCards(){
 function renderBackupStatus(){
   const el = $('#backup-status'); if (!el || !window.Backup) return;
   const when = Backup.lastBackupWhen();
-  el.innerHTML = `<div class="inv-sum-row"><span>Last backup</span><b>${when ? when.slice(0,16).replace('T',' ') : 'never'}</b></div>`+
-                 `<div class="inv-sum-row"><span>Auto-backup</span><b>every 3 days</b></div>`;
+  let ago = 'never', stale = true;
+  if (when) {
+    const days = Math.floor((Date.now() - new Date(when).getTime()) / 86400000);
+    ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : days + ' days ago';
+    stale = days > 5;
+  }
+  el.innerHTML = `<div class="inv-sum-row"><span>Last backup</span><b class="${stale?'neg':'pos'}">${ago}</b></div>`+
+                 `<div class="inv-sum-row"><span>Auto-backup</span><b>every 3 days</b></div>`+
+                 `<div class="inv-sum-row"><span>App version</span><b>${window.APP_VERSION||'?'}</b></div>`+
+                 (stale ? `<div class="hint" style="color:#d29922;margin-top:4px">⚠️ Consider backing up — download a copy to keep it safe.</div>` : '');
 }
 function backupNowUI(){
   if (!window.Backup) return;
@@ -1004,13 +1127,18 @@ async function scanIntoAddCard(file){
     await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = URL.createObjectURL(file); });
     const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
     c.getContext('2d').drawImage(img, 0, 0);
-    const W = c.width, H = c.height;
-    const nameRegion = cropCanvas(c, 0, 0, W, Math.round(H * 0.18));
-    const codeRegion = cropCanvas(c, Math.round(W * 0.55), Math.round(H * 0.82), Math.round(W * 0.45), Math.round(H * 0.18));
-    const [nameRes, codeRes] = await Promise.all([ Tesseract.recognize(nameRegion,'eng'), Tesseract.recognize(codeRegion,'eng') ]);
-    const name = cleanName(nameRes.data.text), code = cleanCode(codeRes.data.text);
-    if ($('#af-name')) $('#af-name').value = name;
-    if ($('#af-number')) $('#af-number').value = code;
+    let name, code;
+    if (typeof Scanner !== 'undefined') {
+      const r = await Scanner.scan(c);
+      name = r.name; code = r.cardNumber;
+    } else {
+      const nameRegion = cropCanvas(c, 0, 0, c.width, Math.round(c.height * 0.18));
+      const codeRegion = cropCanvas(c, Math.round(c.width * 0.55), Math.round(c.height * 0.82), Math.round(c.width * 0.45), Math.round(c.height * 0.18));
+      const [nameRes, codeRes] = await Promise.all([ Tesseract.recognize(nameRegion,'eng'), Tesseract.recognize(codeRegion,'eng') ]);
+      name = cleanName(nameRes.data.text); code = cleanCode(codeRes.data.text);
+    }
+    if ($('#af-name')) $('#af-name').value = name || '';
+    if ($('#af-number')) $('#af-number').value = code || '';
     if (st) st.textContent = '✓ Read — check & fix any misreads, then fill costs.';
   } catch (e) {
     if (st) st.textContent = 'Could not read the card — type it in manually.';
@@ -1628,6 +1756,19 @@ document.body.addEventListener('click', e => {
     },
     'calc': calcFlip,
     'save-card': saveCard,
+    'scan-pick-alt': (el) => {
+      const idx = +(el && el.dataset ? el.dataset.idx : -1);
+      const r = state.scanResult;
+      if (!r || !r.alternativeMatches || !r.alternativeMatches[idx]) return;
+      const card = r.alternativeMatches[idx].card;
+      $('#f-name').value = card.name || '';
+      $('#f-code').value = card.number || '';
+      if (state.scan) { state.scan.name = card.name || ''; state.scan.code = card.number || ''; }
+    },
+    'open-verify': () => openVerifyScreen(),
+    'verify-close': () => { $('#verify-screen').classList.add('hidden'); },
+    'verify-confirm-business': () => confirmVerifiedCard('business'),
+    'verify-confirm-collection': () => confirmVerifiedCard('collection'),
     'scan-to-business': () => {
       const name = $('#f-name').value.trim(); const code = $('#f-code').value.trim();
       if (!name) { alert('Enter a card name first.'); return; }
@@ -1685,7 +1826,7 @@ document.body.addEventListener('click', e => {
   if (a.dataset.action === 'inv-add-save') { saveAddCard(); return; }
   if (a.dataset.action === 'backup-now') { backupNowUI(); return; }
   if (a.dataset.action === 'backup-download') { if(window.Backup) Backup.downloadBackup(); return; }
-  if (map[a.dataset.action]) map[a.dataset.action]();
+  if (map[a.dataset.action]) map[a.dataset.action](a);
 });
 // inventory filter + search
 if ($('#inv-status-filter')) $('#inv-status-filter').addEventListener('change', e => { invStatusFilter = e.target.value; renderInventory(); });
