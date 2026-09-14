@@ -34,19 +34,11 @@
     <!-- ============ SCAN ============ -->
     <section id="pane-scan" class="pane active">
       <div class="card-block">
-        <div class="sr-title">Search by name</div>
-        <p class="hint" style="margin-top:0">Know the card already? Type it and skip scanning.</p>
-        <label class="field"><span>Card name</span><input type="text" id="s-name" placeholder="e.g. Kakarot the One and Only" /></label>
-        <label class="field"><span>Card code / number (optional)</span><input type="text" id="s-code" placeholder="e.g. BT1-001" /></label>
-        <button class="btn-primary block" data-action="search-name">Look up prices →</button>
-      </div>
-
-      <div class="card-block">
-        <div class="sr-title">Or scan the card</div>
-        <p class="lead">Scan to read its <b>name</b> (top) and <b>card code</b> (bottom-right), then look up prices and calc the grading flip.</p>
+        <div class="sr-title">Scan the card</div>
+        <p class="lead">Center the card so it <b>fills the frame</b>, tap to focus, and use good even lighting (avoid glare on foils). Then Capture &amp; Read.</p>
         <div id="cam-wrap" class="cam-wrap hidden">
           <video id="cam" playsinline muted></video>
-          <div class="cam-guide"><span class="guide-top">Name strip</span><span class="guide-code">Card code</span></div>
+          <div class="cam-guide"><span class="guide-top">Name</span><span class="guide-code">Card #</span></div>
         </div>
         <canvas id="cap-canvas" class="hidden"></canvas>
         <div id="ocr-status" class="status hidden"></div>
@@ -55,6 +47,7 @@
           <button class="btn-secondary block hidden" id="capture-btn" data-action="capture">Capture &amp; Read</button>
         </div>
         <label class="field"><span>Or upload a photo</span><input type="file" id="photo-input" accept="image/*" /></label>
+        <p class="hint" style="margin-top:6px">💡 <b>Best results for small card numbers:</b> take the photo with your iPhone's built-in <b>Camera app</b> (it uses the macro lens up close), then tap <b>Upload a photo</b> above. That's sharper than the in-app camera.</p>
       </div>
 
       <div id="scan-result" class="card-block hidden">
@@ -463,8 +456,7 @@
           </div>
         </div>
         <div class="inv-editor-foot">
-          <button class="btn-primary block" data-action="verify-confirm-business">📦 Confirm → Add to Business</button>
-          <button class="btn-secondary block" data-action="verify-confirm-collection" style="margin-top:8px">📈 Confirm → Add to Collection</button>
+          <button class="btn-primary block" data-action="verify-confirm-business">📦 Confirm &amp; add to inventory</button>
         </div>
       </div>
     </div>
@@ -474,7 +466,6 @@
       <button class="tab active" data-view="scan"><span class="tico">📷</span><span>Scan</span></button>
       <button class="tab" data-view="business"><span class="tico">📦</span><span>Business</span></button>
       <button class="tab" data-view="inventory"><span class="tico">🗂️</span><span>Inventory</span></button>
-      <button class="tab" data-view="collection"><span class="tico">📈</span><span>Collection</span></button>
     </nav>
   </div>
 
@@ -508,7 +499,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v64';
+    window.APP_VERSION = 'v68';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

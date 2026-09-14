@@ -78,7 +78,7 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 .sc-del{padding:7px 12px;font-size:12px;}
 .empty{text-align:center;color:var(--text-faint);font-size:13px;padding:30px 10px;}
 
-.tabbar{position:fixed;bottom:0;left:0;right:0;max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);
+.tabbar{position:fixed;bottom:0;left:0;right:0;max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);
   background:linear-gradient(0deg,#1c0606,#160505);border-top:1px solid var(--glass-hi);padding:8px 6px calc(8px + env(safe-area-inset-bottom));}
 .tab{background:none;border:none;color:var(--text-faint);font-size:10.5px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:4px;}
 .tab .tico{font-size:18px;}
@@ -157,7 +157,7 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 .col-hero-label{font-size:10px;letter-spacing:.1em;color:var(--text-faint);font-weight:700;}
 .col-hero-value{font-size:34px;font-weight:900;background:linear-gradient(90deg,#ff6a5c,#ffcf5c);-webkit-background-clip:text;background-clip:text;color:transparent;margin:2px 0;}
 .col-hero-sub{font-size:11px;color:var(--muted);}
-.col-perf-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;}
+.col-perf-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;}
 .perf-box{background:var(--card-2);border:1px solid var(--glass-hi);border-radius:9px;padding:7px 6px;text-align:center;}
 .pf-lbl{font-size:8.5px;letter-spacing:.04em;color:var(--text-faint);font-weight:700;}
 .pf-val{font-size:12px;font-weight:800;margin-top:2px;}
@@ -302,3 +302,7 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 /* ---- Quick sell button on collapsed inventory row ---- */
 .inv-quick-sell{margin-top:4px;background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
 .inv-quick-sell:active{background:#1858c4}
+
+/* ---- Closed packs section ---- */
+.prod-closed{margin-top:8px;font-size:12px;color:#8b949e}
+.prod-closed summary{cursor:pointer;padding:4px 0;color:#58a6ff}

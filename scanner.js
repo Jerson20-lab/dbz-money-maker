@@ -107,36 +107,132 @@ const Scanner = (function () {
     return c;
   }
 
-  /* ---------------- 2. OCR (multi-region) ---------------- */
-  // Reads several regions. Returns { name, number, bottom, full } raw strings.
-  async function ocrRegions(canvas) {
-    const W = canvas.width, H = canvas.height;
-    const pre = preprocess(canvas);
-    // Regions (fractions of the card). These are heuristics for DBFW layout.
-    const nameC   = crop(pre, 0,          0,          W,        H * 0.16); // top strip = name
-    const numberC = crop(pre, W * 0.50,   H * 0.80,   W * 0.50, H * 0.20); // bottom-right = number
-    const bottomC = crop(pre, 0,          H * 0.80,   W,        H * 0.20); // whole bottom = set/rarity/small text
-    // Number region gets a restricted charset for accuracy.
-    const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' };
-    const [nameR, numberR, bottomR] = await Promise.all([
-      Tesseract.recognize(nameC,   'eng'),
-      Tesseract.recognize(numberC, 'eng', numOpts).catch(() => Tesseract.recognize(numberC, 'eng')),
-      Tesseract.recognize(bottomC, 'eng')
-    ]);
-    return {
-      name:   (nameR.data.text   || '').trim(),
-      number: (numberR.data.text || '').trim(),
-      bottom: (bottomR.data.text || '').trim(),
-      // confidences from Tesseract (0..100)
-      _conf: {
-        name:   nameR.data.confidence   || 0,
-        number: numberR.data.confidence || 0,
-        bottom: bottomR.data.confidence || 0
+  /* ---------------- CARD DETECTION ----------------
+   * Heuristic (no external lib): downscale, find the bounding box of the region
+   * that differs from the background (edges/content). Returns {found, box, cropped}.
+   * If it can't confidently find a card-shaped region, found=false and we fall back
+   * to the whole image (so scanning still works).
+   */
+  function detectCard(srcCanvas) {
+    try {
+      const MAXW = 400;
+      const scale = Math.min(1, MAXW / srcCanvas.width);
+      const w = Math.max(1, Math.round(srcCanvas.width * scale));
+      const h = Math.max(1, Math.round(srcCanvas.height * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d'); ctx.drawImage(srcCanvas, 0, 0, w, h);
+      const d = ctx.getImageData(0, 0, w, h).data;
+      // background = average of the 4 corners
+      const cornerIdx = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + (w - 1)) * 4];
+      let br = 0, bg = 0, bb = 0;
+      cornerIdx.forEach(i => { br += d[i]; bg += d[i + 1]; bb += d[i + 2]; });
+      br /= 4; bg /= 4; bb /= 4;
+      const THRESH = 48; // how different from bg counts as "content"
+      let minX = w, minY = h, maxX = 0, maxY = 0, hits = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          const diff = Math.abs(d[i] - br) + Math.abs(d[i + 1] - bg) + Math.abs(d[i + 2] - bb);
+          if (diff > THRESH) {
+            hits++;
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+          }
+        }
       }
+      const area = (maxX - minX) * (maxY - minY);
+      const frac = area / (w * h);
+      // require the content region to be a meaningful chunk of the frame
+      const found = hits > (w * h * 0.05) && frac > 0.15 && (maxX > minX) && (maxY > minY);
+      if (!found) return { found: false, cropped: srcCanvas };
+      // map box back to full-res, with a small padding
+      const inv = 1 / scale, pad = 6;
+      const x0 = Math.max(0, (minX - pad) * inv);
+      const y0 = Math.max(0, (minY - pad) * inv);
+      const x1 = Math.min(srcCanvas.width, (maxX + pad) * inv);
+      const y1 = Math.min(srcCanvas.height, (maxY + pad) * inv);
+      const cw = x1 - x0, ch = y1 - y0;
+      if (cw < 40 || ch < 40) return { found: false, cropped: srcCanvas };
+      return { found: true, box: { x: x0, y: y0, w: cw, h: ch }, cropped: crop(srcCanvas, x0, y0, cw, ch) };
+    } catch (e) {
+      return { found: false, cropped: srcCanvas };
+    }
+  }
+
+  /* ---------------- 2. OCR ----------------
+   * Detect the card, crop to it, then OCR: (a) the full card for names/text, and
+   * (b) a high-res bottom band with a restricted charset for the small card number.
+   * Returns raw text + per-line data + a detection flag.
+   */
+  async function ocrRegions(canvas) {
+    const det = detectCard(canvas);
+    const card = det.cropped;                 // cropped to the card (or full image if not found)
+    const pre = preprocess(card);
+    const W = pre.width, H = pre.height;
+    // bottom band (where the card number lives, both layouts) — upscale x2 for small text
+    const bandRaw = crop(pre, 0, H * 0.78, W, H * 0.22);
+    const band = document.createElement('canvas');
+    band.width = bandRaw.width * 2; band.height = bandRaw.height * 2;
+    band.getContext('2d').drawImage(bandRaw, 0, 0, band.width, band.height);
+    const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' };
+    const [fullR, bandR] = await Promise.all([
+      Tesseract.recognize(pre, 'eng'),
+      Tesseract.recognize(band, 'eng', numOpts).catch(() => Tesseract.recognize(band, 'eng'))
+    ]);
+    // extract per-line text + vertical position from the full OCR (for name-finding)
+    const lines = [];
+    try {
+      (fullR.data.lines || []).forEach(ln => {
+        const t = (ln.text || '').trim();
+        if (t) lines.push({ text: t, conf: ln.confidence || 0, yTop: (ln.bbox ? ln.bbox.y0 : 0) / H });
+      });
+    } catch (e) {}
+    return {
+      full:   (fullR.data.text || '').trim(),
+      band:   (bandR.data.text || '').trim(),
+      lines,
+      detected: det.found,
+      _conf: { full: fullR.data.confidence || 0, band: bandR.data.confidence || 0 }
     };
   }
 
+  // Words/phrases that indicate EFFECT/rules text, not a card name. Used to exclude
+  // lines when picking the title.
+  // Effect/rules text detector. A line is "effect text" if it contains effect-specific
+  // keyword phrases (not single words like "Power" that also appear in card names).
+  const EFFECT_HINTS = /\b(when this|if your|choose one|choose up to|this card gets|activate\s*:|auto\s*:|on play|counter\s*:|place up to|draw \d|from your (hand|life|deck|warp)|opponent'?s (turn|battle)|super combo|double strike|dual attack|in your (warp|battle area|deck))\b/i;
+  // Character trait lines (e.g. "Saiyan/Earthling/Planet Namek", "Saiyan/Wicked Soul").
+  const TRAIT_HINTS = /\b(saiyan|earthling|namekian|frieza\s*clan|android|god|majin|wicked soul|planet|universe|resurrection)\b/i;
+  const STAT_HINTS = /^\s*[0-9,]{3,}\s*$/; // pure power numbers like 20000, 15000
+
   /* ---------------- 3. NORMALIZATION ---------------- */
+  // From the OCR lines, pick the most likely CARD NAME.
+  // Titles are short-ish, near the top, mostly letters, and NOT effect/stat text.
+  // Works for both layouts: Fusion World (title at very top) and Masters (title top band).
+  function findCardName(lines, fallbackFull) {
+    const cand = (lines || [])
+      .filter(l => l.text && l.text.length >= 3 && l.text.length <= 48)
+      .filter(l => !EFFECT_HINTS.test(l.text))
+      .filter(l => !TRAIT_HINTS.test(l.text))
+      .filter(l => !STAT_HINTS.test(l.text))
+      .filter(l => (l.text.replace(/[^A-Za-z]/g, '').length / l.text.length) > 0.5) // mostly letters
+      .map(l => {
+        let score = (l.conf || 0);
+        if (l.yTop < 0.14) score += 60;          // title band (both layouts put name high OR very bottom)
+        else if (l.yTop < 0.30) score += 20;
+        else if (l.yTop > 0.88) score += 25;      // Masters name can sit just above traits at bottom
+        else score -= 20;                          // middle = almost always effect text
+        if (/[:,]/.test(l.text)) score += 8;
+        if (/\b(SSJ|SSB|SSG|SSGSS|Super|Saiyan God|Goku|Vegeta|Trunks|Gohan|Broly|Frieza|Cell|Buu|Piccolo|Krillin)\b/i.test(l.text)) score += 12;
+        return { text: l.text, score };
+      })
+      .sort((a, b) => b.score - a.score);
+    if (cand.length) return cand[0].text;
+    const fl = (fallbackFull || '').split('\n').map(s => s.trim())
+      .find(s => s.length >= 3 && !EFFECT_HINTS.test(s) && !TRAIT_HINTS.test(s) && !STAT_HINTS.test(s));
+    return fl || '';
+  }
+
   // Clean a card NAME: keep letters/digits/space/apostrophe/hyphen/&/. — no
   // aggressive character swapping (names must not be silently altered).
   function normalizeName(t) {
@@ -155,25 +251,45 @@ const Scanner = (function () {
   const L2D = { O: '0', I: '1', L: '1', S: '5', B: '8', G: '6', Z: '2', T: '7', A: '4' };
   const D2L = { '0': 'O', '1': 'I', '5': 'S', '8': 'B', '6': 'G', '2': 'Z' };
 
-  function fixNumberPart(s) { // after hyphen — should be digits (+ optional trailing letter)
-    // keep a trailing letter (e.g. 012a foil), convert the rest to digits
-    const m = s.match(/^([A-Z0-9]*?)([A-Z])?$/);
+  function fixNumberPart(s) { // after hyphen — should be digits (+ optional trailing letter variant)
+    // A trailing letter is only kept as a variant suffix if it's NOT a digit look-alike
+    // (foil suffixes are usually a/b/c/p/f — not O/I/S/B/G/Z). Otherwise convert it.
+    const t = s.match(/^([A-Z0-9]+)([A-Z])$/i);
     let core = s, tail = '';
-    // detect trailing single letter suffix
-    const t = s.match(/^([0-9OISBGZTA]+)([A-Z])$/i);
-    if (t) { core = t[1]; tail = t[2]; }
+    if (t) {
+      const lastLetter = t[2].toUpperCase();
+      if (!(lastLetter in L2D)) { core = t[1]; tail = t[2]; }  // real variant suffix, keep
+      // else: it's a look-alike (O/I/S/B/G/Z/T/A) → treat as part of the number, convert below
+    }
     core = core.replace(/[A-Z]/gi, ch => L2D[ch.toUpperCase()] || ch);
     return core + tail;
   }
-  function fixPrefixPart(s) { // before hyphen — leading letters then optional set-number digits
-    // e.g. BT31, EB1, FB08. Fix look-alike digits in the LETTER part back to letters.
-    const mm = s.match(/^([A-Z0-9]*[A-Z])([0-9]*)$/);
+  function fixPrefixPart(s) { // before hyphen — SET CODE (letters) + optional set-number (1-2 digits)
+    // DBFW prefixes: 1-4 letters then 0-2 digits (BT16, FB05, ST01, EB1, P).
+    // Strategy: try each known set code as the leading letters; the remainder (<=2 chars)
+    // is the set-number and gets look-alikes converted to digits.
+    const up = s.toUpperCase();
+    for (const code of KNOWN_SET_PREFIXES.slice().sort((a,b)=>b.length-a.length)) {
+      // match code allowing look-alike digits in place of its letters
+      const codeRe = new RegExp('^' + code.split('').map(ch => {
+        const alt = Object.keys(D2L).filter(d => D2L[d] === ch);
+        return alt.length ? '[' + ch + alt.join('') + ']' : ch;
+      }).join('') + '([0-9OISBGZ]{0,2})$');
+      const m = up.match(codeRe);
+      if (m) {
+        const setNo = (m[1] || '').replace(/[A-Z]/g, ch => L2D[ch] || ch);
+        return code + setNo;
+      }
+    }
+    // unknown code: leading alpha run = code (convert digit look-alikes to letters),
+    // trailing 1-2 digit-ish = set number.
+    const mm = up.match(/^([A-Z0-9]+?)([0-9OISBGZ]{0,2})$/);
     if (mm) {
       const letters = mm[1].replace(/[0-9]/g, d => D2L[d] || d);
-      return letters + mm[2];
+      const digits = (mm[2] || '').replace(/[A-Z]/g, ch => L2D[ch] || ch);
+      return letters + digits;
     }
-    // all-letters or unusual — convert obvious digit-look-alikes to letters
-    return s.replace(/[0-9]/g, d => D2L[d] || d);
+    return up.replace(/[0-9]/g, d => D2L[d] || d);
   }
 
   // Extract & normalize a card number from arbitrary OCR text.
@@ -190,11 +306,19 @@ const Scanner = (function () {
       const num = fixNumberPart(numRaw);
       const normalized = prefix + '-' + num;
       const known = KNOWN_SET_PREFIXES.some(p => prefix.startsWith(p));
-      const cand = { raw: (prefixRaw + '-' + numRaw), normalized, known,
-                     score: (known ? 2 : 0) + (num.length >= 2 ? 1 : 0) };
+      // Canonical DBFW shape: 2-4 letters, optional set digits, hyphen, then 2-3 digits.
+      const canonical = /^[A-Z]{1,2}[A-Z]?[0-9]{1,2}$/.test(prefix) && /^[0-9]{2,3}[A-Z]?$/.test(num);
+      const numDigits = /^[0-9]{2,3}[A-Z]?$/.test(num);
+      let score = 0;
+      if (known) score += 3;
+      if (canonical) score += 4;
+      if (numDigits) score += 2;           // number part is really digits (not letters like NR)
+      if (/[0-9]/.test(prefix)) score += 1; // prefix has a set number (BT16, FB05)
+      const cand = { raw: (prefixRaw + '-' + numRaw), normalized, known, score };
       if (!best || cand.score > best.score) best = cand;
     }
-    if (best) return { raw: best.raw, normalized: best.normalized, valid: best.known };
+    // require a minimally plausible number (avoid matching junk like "ES-NR")
+    if (best && best.score >= 2) return { raw: best.raw, normalized: best.normalized, valid: best.known };
     // fallback: no hyphen found — try to see a prefix+digits blob
     const blob = up.match(/[A-Z]{1,4}\s*[0-9]{2,4}[A-Z]?/);
     if (blob) {
@@ -230,15 +354,45 @@ const Scanner = (function () {
   // Returns { variant, altArt, confidence, evidence }.
   // If nothing detected, variant stays '' and altArt is 'Unknown — Verify'
   // (never guesses base vs alt).
-  function analyzeVariant(allText) {
+  /* ---------------- 4. VARIANT ANALYSIS ----------------
+   * DBFW alt-arts are signaled by (a) the RARITY CODE (SPR/SCR/SEC are inherently
+   * special/alt-art versions) and (b) a STAR marker (★) after the rarity — which OCR
+   * usually mangles into *, k, x, or drops. We detect the star, flag it as a star
+   * variant, but NEVER guess 1★ vs 2★ (OCR can't count tiny stars) — that goes to Verify.
+   * Returns { variant, altArt, starVariant, confidence, evidence }.
+   */
+  const ALTART_RARITIES = ['SPR', 'SCR', 'SEC']; // inherently special/alt-art rarity codes
+  function analyzeVariant(allText, rarity, bandText) {
     const found = [];
     for (const v of VARIANT_KEYWORDS) if (v.re.test(allText)) found.push(v.label);
+
+    // (a) rarity-code signal
+    const rar = (rarity || '').toUpperCase();
+    const rarityAlt = ALTART_RARITIES.includes(rar);
+    if (rarityAlt && !found.includes('Special/Secret Art')) found.push(rar + ' (special/alt art)');
+
+    // (b) star marker after the rarity, in the band text. OCR of ★ is unreliable, so we
+    // look for a rarity code immediately followed by a star-like glyph.
+    let starVariant = false;
+    const band = (bandText || allText || '').toUpperCase();
+    // e.g. "SR★", "R ★", "SR*", "SRK", "SR X" right after a known rarity token
+    const rarAlt = RARITY_TOKENS.slice().sort((a,b)=>b.length-a.length).join('|');
+    const starRe = new RegExp('(?:' + rarAlt + ')\\s*[\\*\\u2605\\u2606KX]', 'i');
+    if (starRe.test(band)) starVariant = true;
+    if (starVariant && !found.some(f => /star/i.test(f))) found.push('Star (verify 1★/2★)');
+
     if (found.length) {
-      const altArt = found.some(f => /Alt|Special|Parallel|Star|Secret/i.test(f)) ? found.join(', ') : '';
-      return { variant: found.join(', '), altArt: altArt || '', confidence: 0.7, evidence: found };
+      const isAlt = rarityAlt || starVariant || found.some(f => /alt|special|parallel|secret|star/i.test(f));
+      return {
+        variant: found.join(', '),
+        altArt: isAlt ? found.join(', ') : '',
+        starVariant,
+        confidence: (rarityAlt ? 0.85 : starVariant ? 0.6 : 0.7),
+        evidence: found
+      };
     }
-    // nothing found → don't guess
-    return { variant: '', altArt: 'Unknown — Verify', confidence: 0, evidence: [] };
+    // nothing detected → don't guess
+    return { variant: '', altArt: 'Unknown — Verify', starVariant: false, confidence: 0, evidence: [] };
   }
 
   /* ---------------- 5. DATABASE MATCH ---------------- */
@@ -325,31 +479,29 @@ const Scanner = (function () {
     const t0 = Date.now();
     const raw = await ocrRegions(canvas);
 
-    // --- normalize
-    let nameCorrected = normalizeName(raw.name);
-    const numFromNumberRegion = extractCardNumber(raw.number);
-    const numFromBottom = extractCardNumber(raw.bottom);
-    // prefer the dedicated number region; fall back to bottom strip
-    let number = numFromNumberRegion.normalized ? numFromNumberRegion : numFromBottom;
+    // --- pick the name from the OCR lines (excludes effect/stat text) ---
+    const nameRawPick = findCardName(raw.lines, raw.full);
+    let nameCorrected = normalizeName(nameRawPick);
+    // --- find the card number anywhere in the number band, then the full text ---
+    let number = extractCardNumber(raw.band);
+    if (!number.normalized) number = extractCardNumber(raw.full);
     // --- apply learned corrections (exact raw-key match only) ---
-    nameCorrected = applyLearned('name', raw.name, nameCorrected);
+    nameCorrected = applyLearned('name', nameRawPick, nameCorrected);
     const learnedNum = applyLearned('number', number.raw, number.normalized);
     if (learnedNum !== number.normalized) {
       number = { raw: number.raw, normalized: learnedNum, valid: true, learned: true };
     }
-    const rarity = extractRarity(raw.bottom);
-    const set = extractSet(number.normalized, raw.bottom);
-    const allText = [raw.name, raw.bottom].join(' ');
-    const variant = analyzeVariant(allText);
+    const rarity = extractRarity(raw.band + ' ' + raw.full);
+    const set = extractSet(number.normalized, raw.band);
+    const variant = analyzeVariant(raw.full + ' ' + raw.band, rarity, raw.band);
 
     const scanObj = {
-      // NAME: raw preserved + corrected
-      name:   { raw: raw.name, corrected: nameCorrected },
-      // NUMBER: raw preserved + normalized + validity
+      name:   { raw: nameRawPick, corrected: nameCorrected },
       number: { raw: number.raw, normalized: number.normalized, valid: number.valid },
       set, rarity, variant,
-      _ocrConf: raw._conf,
-      _rawOcr: { name: raw.name, number: raw.number, bottom: raw.bottom }
+      _ocrConf: { name: raw._conf.full, number: raw._conf.band, bottom: raw._conf.band },
+      _rawOcr: { name: nameRawPick, number: number.raw, bottom: raw.band, full: raw.full },
+      _detected: raw.detected
     };
 
     const candidates = await matchCandidates(scanObj);
@@ -357,6 +509,7 @@ const Scanner = (function () {
     const confidence = confidenceFor(scanObj, top);
 
     return {
+      detected: raw.detected,
       // ---- raw + corrected (never overwrite raw) ----
       rawOcr: scanObj._rawOcr,
       name: scanObj.name.corrected,
@@ -368,6 +521,7 @@ const Scanner = (function () {
       rarity: scanObj.rarity,
       variant: scanObj.variant.variant,
       altArt: scanObj.variant.altArt,   // 'Unknown — Verify' when undetectable
+      starVariant: scanObj.variant.starVariant,
       // ---- matching ----
       match: top ? top.card : null,
       matchScore: top ? top.score : 0,
@@ -383,7 +537,7 @@ const Scanner = (function () {
   }
 
   return { scan, setExternalMatcher, extractCardNumber, normalizeName, analyzeVariant, preprocess,
-           learnCorrection, applyLearned, loadLearn };
+           learnCorrection, applyLearned, loadLearn, findCardName, detectCard };
 })();
 
 if (typeof window !== 'undefined') window.Scanner = Scanner;

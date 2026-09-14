@@ -103,8 +103,30 @@ function showView(v) {
 let stream = null;
 async function startCam() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    // Request the highest resolution the back camera offers + continuous autofocus.
+    // More pixels = the small card number reads far better.
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 3840 },
+        height: { ideal: 2160 },
+        focusMode: 'continuous'
+      }
+    }).catch(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }));
     const v = $('#cam'); v.srcObject = stream; await v.play();
+    // Best-effort: apply continuous focus + a modest zoom on devices that support it.
+    // Many iOS versions ignore these — that's fine, we just try.
+    try {
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      const adv = [];
+      if (caps.focusMode && caps.focusMode.includes('continuous')) adv.push({ focusMode: 'continuous' });
+      if (caps.zoom && caps.zoom.max) {
+        const z = Math.min(caps.zoom.max, Math.max(caps.zoom.min || 1, 2)); // ~2x if allowed
+        adv.push({ zoom: z });
+      }
+      if (adv.length) await track.applyConstraints({ advanced: adv });
+    } catch (e) { /* zoom/focus not supported on this device — ignore */ }
     $('#cam-wrap').classList.remove('hidden');
     $('#capture-btn').classList.remove('hidden');
     const btn = $('[data-action="start-cam"]'); if (btn) btn.textContent = '✕ Close Camera';
@@ -175,6 +197,9 @@ async function runOcr(canvas) {
   try {
     const result = await Scanner.scan(canvas);
     result.image = thumb;
+    if (!result.detected) {
+      ocrStatus('⚠️ No card clearly detected — center the card on a plain background and try again. (Read anyway below.)', true);
+    }
     // Preserve the FULL structured scan result (raw OCR included) for verification.
     state.scanResult = result;
     // Back-compat: keep the simple fields the rest of the app already uses.
@@ -210,6 +235,13 @@ function openVerifyScreen(){
   if ($('#verify-set'))      $('#verify-set').value = r.set || '';
   if ($('#verify-rarity'))   $('#verify-rarity').value = r.rarity || '';
   if ($('#verify-variant'))  $('#verify-variant').value = (r.variant || '');
+  // Star variant detected → prompt to confirm 1★ vs 2★ (OCR can't count reliably).
+  if (r.starVariant && $('#verify-variant')) {
+    const pick = prompt('⭐ This looks like a STAR variant (alt art).\n\nHow many stars? Type 1 or 2 (or leave blank to decide later):', '1');
+    if (pick === '1') $('#verify-variant').value = '1★ (Star / Alt Art)';
+    else if (pick === '2') $('#verify-variant').value = '2★ (Star / Alt Art)';
+    else $('#verify-variant').value = 'Star / Alt Art (verify ★ count)';
+  }
   if ($('#verify-language')) $('#verify-language').value = 'EN';
   if ($('#verify-qty')) $('#verify-qty').value = '1';
   const thumb = (state.scan && state.scan.image) || (r.image) || '';
@@ -812,7 +844,9 @@ function renderInventory(){
   if (!listEl) return;
   if (!filtered.length) { listEl.innerHTML = `<p class="hint">No items${invStatusFilter!=='all'?' with this status':''} yet. Add cards to your Collection and they'll appear here with full cost-basis tracking.</p>`; return; }
 
-  listEl.innerHTML = groupInventory(filtered).map(group => {
+  listEl.innerHTML = groupInventory(filtered)
+    .sort((ga, gb) => invItemName(ga.items[0]).toLowerCase().localeCompare(invItemName(gb.items[0]).toLowerCase()))
+    .map(group => {
     if (group.items.length === 1) return renderInvItemRow(group.items[0]);
     return renderInvStack(group);
   }).join('');
@@ -1359,7 +1393,7 @@ function renderProducts(){
       profitLine = `<div class="inv-item-profit"><span class="${pr.projectedProfit>=0?'pos':'neg'}">Opened ${pr.openedUnits}: pulls ${pr.pulls} · sold ${money(pr.soldRevenue)} · remaining ${money(pr.remainingValue)} · proj. profit ${money(pr.projectedProfit)}${pr.roi!=null?` (${pr.roi}%)`:''}</span></div>`;
     }
     const sess = Products.sessionsForProduct(p.id);
-    const sessLines = sess.map(s=>{
+    const renderSess = (s, closed) => {
       const items = (Collection.items()||[]);
       const pulls = (s.cardItemIds||[]).map(id=>items.find(x=>x.id===id)).filter(Boolean);
       const pullList = pulls.map(it=>{
@@ -1367,8 +1401,19 @@ function renderProducts(){
         const soldTag = it.status==='sold' ? ` · <span class="pos">sold ${money((it.sale&&it.sale.price)||0)}</span>` : '';
         return `<div class="prod-pull-row">• ${escapeHtmlSafe(c.name||it.cardKey)} — basis ${money(Inventory.costBasis(it))}${soldTag}</div>`;
       }).join('');
-      return `<div class="prod-sess">🎴 ${escapeHtmlSafe(s.unitLabel)} — ${s.cardItemIds.length} pull${s.cardItemIds.length===1?'':'s'} <span class="prod-addpull" data-action="prod-add-pull" data-id="${s.id}">+ add pull</span></div>${pullList}`;
-    }).join('');
+      const controls = closed
+        ? `<span class="prod-addpull" data-action="prod-reopen" data-id="${s.id}">↩ reopen</span>`
+        : `<span class="prod-addpull" data-action="prod-add-pull" data-id="${s.id}">+ add pull</span>`+
+          (pulls.length ? ` <span class="prod-addpull" data-action="prod-close" data-id="${s.id}">✓ done pulling</span>` : '');
+      return `<div class="prod-sess">🎴 ${escapeHtmlSafe(s.unitLabel)} — ${s.cardItemIds.length} pull${s.cardItemIds.length===1?'':'s'} ${controls}</div>${pullList}`;
+    };
+    const allSess = Products.sessionsForProduct(p.id);
+    const openSess = allSess.filter(s=>!s.closed);
+    const closedSess = allSess.filter(s=>s.closed);
+    let sessLines = openSess.map(s=>renderSess(s,false)).join('');
+    if (closedSess.length) {
+      sessLines += `<details class="prod-closed"><summary>📦 Closed packs (${closedSess.length})</summary>${closedSess.map(s=>renderSess(s,true)).join('')}</details>`;
+    }
     return `<div class="inv-item">
       <div class="inv-item-head">
         <div class="inv-thumb">${p.image?`<img src="${p.image}" alt="">`:'📦'}</div>
@@ -1688,7 +1733,7 @@ function addCurrentToCollection(){
     valSource: Collection.settings().valuationSource||'ebay',
     purchaseCost: cost? parseFloat(cost): null });
   alert('Added to collection.');
-  showView('collection');
+  showView('inventory');
 }
 
 // refresh prices for the current detail card via the cloud (records history)
@@ -1734,18 +1779,6 @@ document.body.addEventListener('click', e => {
   const map = {
     'start-cam': toggleCam,
     'capture': captureFromVideo,
-    'search-name': () => {
-      const nm = $('#s-name').value.trim();
-      if (!nm) { alert('Enter a card name to search.'); return; }
-      state.scan.name = nm;
-      state.scan.code = $('#s-code').value.trim();
-      $('#f-name').value = state.scan.name;
-      $('#f-code').value = state.scan.code;
-      $('#calc-name').textContent = state.scan.name || '—';
-      $('#calc-code').textContent = state.scan.code || '';
-      buildEbayLinks();
-      showView('calc');
-    },
     'to-calc': () => {
       state.scan.name = $('#f-name').value.trim();
       state.scan.code = $('#f-code').value.trim();
@@ -1788,7 +1821,7 @@ document.body.addEventListener('click', e => {
     'rank-top': rankTop,
     'export-learn': exportCorrections,
     'review-corrections': toggleCorrections,
-    'cd-back': () => showView('collection'),
+    'cd-back': () => showView('inventory'),
     'cd-add': addCurrentToCollection,
     'cd-refresh': refreshCardPrices,
     'col-export': exportCollection,
@@ -1816,6 +1849,8 @@ document.body.addEventListener('click', e => {
   if (a.dataset.action === 'prod-save') { saveProduct(); return; }
   if (a.dataset.action === 'prod-open') { openProductUnit(a.dataset.id); return; }
   if (a.dataset.action === 'prod-add-pull') { addPullToSession(a.dataset.id); return; }
+  if (a.dataset.action === 'prod-close') { Products.closeSession(a.dataset.id); renderProducts(); return; }
+  if (a.dataset.action === 'prod-reopen') { Products.reopenSession(a.dataset.id); renderProducts(); return; }
   if (a.dataset.action === 'prod-sell-bulk') { sellBulkFromProduct(a.dataset.id); return; }
   if (a.dataset.action === 'prod-bulk-del') { Products.removeBulkSale(a.dataset.id, a.dataset.sid); renderProducts(); renderInventory(); return; }
   if (a.dataset.action === 'grade-send') { openGradeSend(a.dataset.id); return; }

@@ -168,6 +168,17 @@ const Products = (() => {
     return r2(base);
   }
   // Bulk sales tagged to a specific pack/session (see addBulkSale sessionId param).
+  // Mark a rip session as "closed" (done pulling) — hides it under Closed packs.
+  // Purely a display flag; does NOT change costs, pulls, or allocation.
+  function closeSession(sessionId){
+    const ss = sessions(); const s = ss.find(x=>x.id===sessionId); if(!s) return;
+    s.closed = true; save(K_SESS, ss);
+  }
+  function reopenSession(sessionId){
+    const ss = sessions(); const s = ss.find(x=>x.id===sessionId); if(!s) return;
+    s.closed = false; save(K_SESS, ss);
+  }
+
   // Sessions WITH pulls == opened units that actually cost something. An empty session
   // (0 pulls — usually an accidental double-open) must NOT inflate the allocation.
   function openedUnitsFor(p){
@@ -247,6 +258,7 @@ const Products = (() => {
     TYPES, products, sessions, getProduct, getSession, totalCost,
     addProduct, updateProduct, removeProduct,
     openUnit, addPullToSession, removePullFromSession, sessionsForProduct,
+    closeSession, reopenSession,
     allocatedCostForItem, sourceOfItem,
     addBulkSale, removeBulkSale, bulkSalesTotal, boxRecovery, itemsForProduct, openedUnitsFor,
     productProfit, profitBySet, today
