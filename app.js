@@ -178,6 +178,46 @@ function makeThumb(canvas, maxW){
     return t.toDataURL('image/jpeg', 0.7);
   } catch (e) { return ''; }
 }
+// Load an image URL into a compact stored thumbnail (data URL). Needs the host to
+// allow cross-origin image use; returns '' on any failure (offline, blocked, 404).
+function urlToThumb(url){
+  return new Promise(resolve=>{
+    if (!url) return resolve('');
+    const img = new Image();
+    img.crossOrigin = 'anonymous';   // needed to read pixels into a canvas
+    img.onload = ()=>{
+      try { const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
+        c.getContext('2d').drawImage(img,0,0); resolve(makeThumb(c, 300)); }   // 300px = crisp but small
+      catch(e){ resolve(''); }
+    };
+    img.onerror = ()=>resolve('');
+    img.src = url;
+  });
+}
+// Fetch + cache the official card image ONCE onto a card (by cardKey), if it doesn't
+// already have one. After success the image is stored locally (offline, no refetch).
+async function cacheCardImage(cardKey, number){
+  try {
+    if (!window.CardDB || !window.Collection) return;
+    const card = Collection.getCard(cardKey); if (!card) return;
+    // Prefer the crisp OFFICIAL image. Fetch it once (even if a scan photo exists),
+    // then never refetch (officialImage flag marks it done).
+    if (card.officialImage) return;
+    if (_imgTried[cardKey]) return;          // already tried this session — wait till next open
+    _imgTried[cardKey] = 1;
+    const url = CardDB.imageUrl(number || card.number); if (!url) return;
+    const thumb = await urlToThumb(url);
+    if (thumb) {
+      // got the official image → use it (overrides scan photo), mark done permanently
+      Collection.upsertCard({ name:card.name, number:card.number, set:card.set,
+        variant:card.variant, rarity:card.rarity, language:card.language, image:thumb,
+        officialImage:true, dbVerified:card.dbVerified }); renderInventory();
+    }
+    // on failure: do NOT set officialImage — it'll retry on the next app open (maybe online then).
+  } catch(e){}
+}
+const _imgTried = {};
+
 // Read an image FILE into a small thumbnail data URL (for manual "add photo").
 function fileToThumb(file){
   return new Promise(resolve=>{
@@ -368,6 +408,8 @@ function confirmVerifiedCard(dest){
   }
   // EXISTING inventory path — do not change cost/accounting logic
   const card = Collection.upsertCard({ name, number, set, variant, rarity, language, image, dbVerified: true });
+  // Prefer the crisp official image over the scan photo: fetch + cache it (once).
+  if (number) cacheCardImage(card.key, number);
   $('#verify-screen').classList.add('hidden');
   $('#scan-result').classList.add('hidden');
   if (dest === 'collection') {
@@ -946,6 +988,19 @@ function renderInventory(){
     if (group.items.length === 1) return renderInvItemRow(group.items[0]);
     return renderInvStack(group);
   }).join('');
+
+  // Lazily fetch+cache ONE missing official image per render (avoids a network burst).
+  try {
+    if (window.CardDB && CardDB.count && CardDB.count() > 0) {
+      const seen = {};
+      for (const it of filtered) {
+        const card = Collection.getCard(it.cardKey);
+        if (card && card.number && !card.officialImage && !seen[card.key]) {
+          seen[card.key] = 1; cacheCardImage(card.key, card.number); break;
+        }
+      }
+    }
+  } catch(e){}
 }
 
 // Group items into stacks: same card + condition + grade-company + grade + status.

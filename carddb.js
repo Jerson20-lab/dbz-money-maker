@@ -97,6 +97,22 @@ const CardDB = (function () {
 
   function count(){ return Object.keys(all()).length; }
 
+  // Official card image URL for a given number (uses img_link == number).
+  // Fusion World sets are hosted on Linode; Masters on Google Storage.
+  const FW_PREFIXES = ['FB','FS','FP','SB']; // Fusion World set families (+ ST handled below)
+  function imageUrl(number){
+    // keep underscore for variant filenames (BT16-107_SPR) but drop other junk
+    const num = (number||'').toUpperCase().replace(/[^A-Z0-9_-]/g,'');
+    if (!num) return '';
+    const setCode = num.split('-')[0].replace(/[0-9_].*$/,''); // leading letters
+    // ST is used by both games; default ST to Fusion World (its ST01 starter is FW).
+    const isFW = FW_PREFIXES.includes(setCode) || setCode === 'ST' || setCode === 'FS' || setCode === 'FP';
+    const host = isFW
+      ? 'https://dbs-deckplanet.us-southeast-1.linodeobjects.com/deckplanet_card_images/'
+      : 'https://storage.googleapis.com/deckplanet_card_images/';
+    return host + encodeURIComponent(num) + '.png';
+  }
+
   // All DB printings that share a base number (base + _SPR/_PR/★ variants).
   // e.g. variantsOf("BT16-107") -> [{number:"BT16-107",rarity:"SR",...},{number:"BT16-107_SPR",rarity:"SPR",...}]
   function variantsOf(number){
@@ -168,7 +184,7 @@ const CardDB = (function () {
   // load any previously-fetched bundled DB on startup
   loadBundledFromStorage();
 
-  return { learn, lookup, bestMatch, all, count, norm, fetchAndLoad, loadBundledFromStorage, variantsOf };
+  return { learn, lookup, bestMatch, all, count, norm, fetchAndLoad, loadBundledFromStorage, variantsOf, imageUrl };
 })();
 
 if (typeof window !== 'undefined') window.CardDB = CardDB;
