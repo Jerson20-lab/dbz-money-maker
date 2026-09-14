@@ -364,6 +364,9 @@ function runImageDiag(){
   const L = [];
   L.push('=== IMAGE DIAGNOSTIC ===');
   L.push('app version: ' + (window.APP_VERSION||'?'));
+  L.push('page URL: ' + location.origin);
+  L.push('modules → CardDB:' + (window.CardDB?'Y':'N') + ' Scanner:' + (window.Scanner?'Y':'N') + ' Collection:' + (window.Collection?'Y':'N') + ' Products:' + (window.Products?'Y':'N'));
+  L.push('CARD_DB_BUNDLED present: ' + (window.CARD_DB_BUNDLED ? Object.keys(window.CARD_DB_BUNDLED).length + ' cards' : 'NO'));
   L.push('CardDB loaded: ' + (window.CardDB ? 'yes' : 'NO') + ' · count: ' + (window.CardDB && CardDB.count ? CardDB.count() : 'n/a'));
   L.push('online: ' + (navigator.onLine ? 'yes' : 'NO'));
   L.push('service worker: ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'active' : 'none'));
@@ -2130,6 +2133,7 @@ document.body.addEventListener('click', e => {
     'verify-list-close': () => { $('#verify-list-screen').classList.add('hidden'); },
     'verify-pick': (el) => verifyPickCard(el),
     'load-carddb': () => loadCardDbUI(),
+    'img-diag': () => runImageDiag(),
     'verify-close': () => { $('#verify-screen').classList.add('hidden'); },
     'verify-confirm-business': () => confirmVerifiedCard('business'),
     'verify-confirm-collection': () => confirmVerifiedCard('collection'),
