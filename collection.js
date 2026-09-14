@@ -40,7 +40,8 @@ const Collection = (() => {
     cards[key] = { ...(cards[key]||{}), key,
       name:c.name||'', number:c.number||'', set:c.set||'', variant:c.variant||'',
       rarity:c.rarity||'', language:c.language||'EN', image:c.image||cards[key]?.image||'',
-      category:c.category||'Dragon Ball TCG' };
+      category:c.category||'Dragon Ball TCG',
+      dbVerified: (c.dbVerified!==undefined ? c.dbVerified : (cards[key]?.dbVerified||false)) };
     save(K_CARDS, cards);
     return cards[key];
   }

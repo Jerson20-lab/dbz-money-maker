@@ -97,6 +97,21 @@ const CardDB = (function () {
 
   function count(){ return Object.keys(all()).length; }
 
+  // All DB printings that share a base number (base + _SPR/_PR/★ variants).
+  // e.g. variantsOf("BT16-107") -> [{number:"BT16-107",rarity:"SR",...},{number:"BT16-107_SPR",rarity:"SPR",...}]
+  function variantsOf(number){
+    const base = norm(number).replace(/_.*$/,'');   // strip any _SPR/_PR suffix to get base
+    const db = all();
+    const out = [];
+    for (const k in db){
+      const kb = k.replace(/_.*$/,'');
+      if (kb === base) out.push({ number: k, ...db[k] });
+    }
+    // base first, then variants
+    out.sort((a,b)=> a.number.length - b.number.length);
+    return out;
+  }
+
   /* ---------------- BUNDLED DB LOADER (Track B) ----------------
    * Fetch the two DeckPlanet card lists FROM THE USER'S DEVICE (which has internet),
    * normalize to {number:{name,set,rarity}}, and persist. After this, the DB works
@@ -153,7 +168,7 @@ const CardDB = (function () {
   // load any previously-fetched bundled DB on startup
   loadBundledFromStorage();
 
-  return { learn, lookup, bestMatch, all, count, norm, fetchAndLoad, loadBundledFromStorage };
+  return { learn, lookup, bestMatch, all, count, norm, fetchAndLoad, loadBundledFromStorage, variantsOf };
 })();
 
 if (typeof window !== 'undefined') window.CardDB = CardDB;

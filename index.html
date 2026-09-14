@@ -29,6 +29,7 @@
     <header class="topbar">
       <div class="tb-title" id="view-title">Scan</div>
       <div class="tb-sub">Raw → Grade → Flip</div>
+      <button class="verify-badge hidden" id="verify-badge" data-action="open-verify-list" aria-label="Cards to verify">🔔<span id="verify-badge-count">0</span></button>
     </header>
 
     <!-- ============ SCAN ============ -->
@@ -429,6 +430,20 @@
       </div>
     </div>
 
+    <!-- Verify-against-database list (pre-existing unverified cards) -->
+    <div id="verify-list-screen" class="inv-editor-overlay hidden">
+      <div class="inv-editor-sheet">
+        <div class="inv-editor-head">
+          <div class="inv-editor-title">Verify cards vs database</div>
+          <button class="inv-ed-close" data-action="verify-list-close" aria-label="Close">✕</button>
+        </div>
+        <div class="inv-editor-body">
+          <p class="hint" style="margin-top:0">These cards haven't been confirmed against the card database. Tap one to pick the exact printing (base / alt-art / star), then it's marked verified.</p>
+          <div id="verify-list"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Scan verification screen -->
     <div id="verify-screen" class="inv-editor-overlay hidden">
       <div class="inv-editor-sheet">
@@ -503,7 +518,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v74';
+    window.APP_VERSION = 'v75';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

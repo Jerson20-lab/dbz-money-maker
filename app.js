@@ -97,6 +97,7 @@ function showView(v) {
   if (v === 'collection') renderCollection();
   if (v === 'inventory') renderInventory();
   if (v === 'business') renderProducts();
+  renderVerifyBadge();
 }
 
 /* ---------- camera + OCR ---------- */
@@ -239,6 +240,62 @@ async function loadCardDbUI(){
   }
 }
 
+// ---- Verify-against-database: cards not yet confirmed vs the card DB ----
+// A card "needs verifying" if it hasn't been marked dbVerified. Only meaningful
+// when a card DB is loaded (otherwise nothing to verify against).
+function unverifiedCards(){
+  try {
+    if (!window.Collection || !Collection.allCards) return [];
+    const dbReady = window.CardDB && CardDB.count && CardDB.count() > 0;
+    if (!dbReady) return [];
+    return Object.values(Collection.allCards() || {}).filter(c => c && !c.dbVerified && c.number);
+  } catch (e) { return []; }
+}
+function renderVerifyBadge(){
+  const b = $('#verify-badge'); if (!b) return;
+  const n = unverifiedCards().length;
+  const cnt = $('#verify-badge-count'); if (cnt) cnt.textContent = n;
+  b.classList.toggle('hidden', n === 0);
+}
+function openVerifyList(){
+  renderVerifyList();
+  const s = $('#verify-list-screen'); if (s) s.classList.remove('hidden');
+}
+function renderVerifyList(){
+  const el = $('#verify-list'); if (!el) return;
+  const cards = unverifiedCards();
+  if (!cards.length) { el.innerHTML = '<p class="hint">✓ All cards verified.</p>'; return; }
+  el.innerHTML = cards.map(c => {
+    const variants = (window.CardDB && CardDB.variantsOf) ? CardDB.variantsOf(c.number) : [];
+    const opts = variants.map((v,i) =>
+      `<button class="btn-secondary block sc-alt-btn" data-action="verify-pick" data-key="${escapeHtmlSafe(c.key)}" data-num="${escapeHtmlSafe(v.number)}" data-rarity="${escapeHtmlSafe(v.rarity||'')}">${escapeHtmlSafe(v.number)} · ${escapeHtmlSafe(v.rarity||'?')}${/★/.test(v.rarity||'')?' ⭐':''}${/SPR|SCR|SLR/.test(v.rarity||'')?' (alt art)':''}</button>`
+    ).join('');
+    return `<div class="inv-item" style="margin-bottom:8px">
+      <div class="inv-item-name">${escapeHtmlSafe(c.name||c.number)} <span class="muted">${escapeHtmlSafe(c.number)}</span></div>
+      <div class="hint" style="margin:2px 0">Pick the exact printing you own:</div>
+      ${opts || '<div class="hint">No database match for this number.</div>'}
+      <button class="btn-secondary block sc-alt-btn" data-action="verify-pick" data-key="${escapeHtmlSafe(c.key)}" data-num="${escapeHtmlSafe(c.number)}" data-rarity="${escapeHtmlSafe(c.rarity||'')}" style="opacity:.7">Keep as-is (mark verified)</button>
+    </div>`;
+  }).join('');
+}
+// Confirm a printing for a pre-existing card: set rarity/variant, mark verified.
+function verifyPickCard(el){
+  if (!el || !el.dataset || !window.Collection) return;
+  const key = el.dataset.key, num = el.dataset.num, rarity = el.dataset.rarity || '';
+  const card = Collection.getCard(key); if (!card) return;
+  const isStar = /★/.test(rarity);
+  const isAlt = /SPR|SCR|SLR/.test(rarity) || isStar;
+  const variant = isStar ? 'Star / Alt Art' : (/SPR|SCR|SLR/.test(rarity) ? 'Alt Art' : (card.variant||''));
+  // renameCard handles re-keying if the number changed; otherwise upsert merges.
+  if (num && num.toUpperCase() !== (card.number||'').toUpperCase() && Collection.renameCard) {
+    Collection.renameCard(key, { name: card.name, number: num });
+  }
+  Collection.upsertCard({ name: card.name, number: num || card.number, set: card.set,
+    rarity: rarity || card.rarity, variant, language: card.language || 'EN',
+    image: card.image, dbVerified: true });
+  renderVerifyList(); renderVerifyBadge(); renderInventory();
+}
+
 // Open the verification screen, pre-filled from the scanner result (or the edited fields).
 function openVerifyScreen(){
   const r = state.scanResult || {};
@@ -292,8 +349,25 @@ function confirmVerifiedCard(dest){
   }
   const image = (state.scan && state.scan.image) || (r && r.image) || '';
   const qty = Math.max(1, parseInt(($('#verify-qty') && $('#verify-qty').value) || '1', 10) || 1);
+  // --- If this scan is for a PACK PULL, add it as a pull and return to Business ---
+  if (state.pullTarget && state.pullTarget.sessionId) {
+    const sid = state.pullTarget.sessionId;
+    for (let i=0;i<qty;i++) addPullCard(sid, { name, number, set, variant, rarity, language, image, dbVerified: true });
+    state.pullTarget = null;
+    $('#verify-screen').classList.add('hidden');
+    $('#scan-result').classList.add('hidden');
+    if (confirm(`✓ Added ${qty>1?qty+'× ':''}${name} as a pull.\n\nScan another pull?`)) {
+      // re-target the same session for the next scan
+      state.pullTarget = { sessionId: sid };
+      resetScanForNext();
+      showView('scan');
+    } else {
+      showView('business');
+    }
+    return;
+  }
   // EXISTING inventory path — do not change cost/accounting logic
-  const card = Collection.upsertCard({ name, number, set, variant, rarity, language, image });
+  const card = Collection.upsertCard({ name, number, set, variant, rarity, language, image, dbVerified: true });
   $('#verify-screen').classList.add('hidden');
   $('#scan-result').classList.add('hidden');
   if (dest === 'collection') {
@@ -1515,13 +1589,26 @@ function addPullToSession(sessionId){
   if (!window.Products || !window.Collection) return;
   const sess = Products.getSession(sessionId); if (!sess) return;
   const prod = Products.getProduct(sess.productId);
+  // Offer: type it, or scan it.
+  const wantScan = confirm('Add this pull by SCANNING the card?\n\nOK = Scan   ·   Cancel = Type it in');
+  if (wantScan) {
+    // Route to the Scan tab; when the scan is confirmed, it'll be added as a pull to this session.
+    state.pullTarget = { sessionId };
+    resetScanForNext();
+    showView('scan');
+    return;
+  }
   const nm = prompt('Pulled card name:'); if (!nm) return;
   const code = prompt('Card number/code (optional):') || '';
-  // create card identity + an owned item, seed acq.price with the per-unit cost (allocated to first pull)
-  const card = Collection.upsertCard({ name:nm.trim(), number:code.trim(), set:(prod&&prod.set)||'', variant:'', language:'EN' });
+  addPullCard(sessionId, { name: nm.trim(), number: code.trim(), set:(prod&&prod.set)||'', variant:'', rarity:'', language:'EN' });
+}
+// Shared: create a pull card + owned item tied to a session (used by type AND scan paths).
+function addPullCard(sessionId, fields){
+  const sess = Products.getSession(sessionId); if (!sess) return;
+  const card = Collection.upsertCard({ name:fields.name, number:fields.number||'', set:fields.set||'',
+    variant:fields.variant||'', rarity:fields.rarity||'', language:fields.language||'EN',
+    image:fields.image||'', dbVerified: !!fields.dbVerified });
   const it = Collection.addItem(card.key, { condition:'raw', qty:1, valSource:'ebay', purchaseCost:0 });
-  // tag traceability. Pulled cards carry $0 acquisition cost: the money was already
-  // counted as the sealed-product purchase, so seeding a cost here would double-count.
   Collection.updateItem(it.id, {
     sourceProductId: sess.productId, sourceSessionId: sessionId,
     acq: { price: 0, shipping:0, tax:0, other:0, date: Products.today() },
@@ -1530,6 +1617,7 @@ function addPullToSession(sessionId){
   Products.addPullToSession(sessionId, it.id);
   renderProducts();
   renderInventory();
+  return it;
 }
 
 function renderCollection(){
@@ -1821,6 +1909,9 @@ document.body.addEventListener('click', e => {
       if (state.scan) { state.scan.name = card.name || ''; state.scan.code = card.number || ''; }
     },
     'open-verify': () => openVerifyScreen(),
+    'open-verify-list': () => openVerifyList(),
+    'verify-list-close': () => { $('#verify-list-screen').classList.add('hidden'); },
+    'verify-pick': (el) => verifyPickCard(el),
     'load-carddb': () => loadCardDbUI(),
     'verify-close': () => { $('#verify-screen').classList.add('hidden'); },
     'verify-confirm-business': () => confirmVerifiedCard('business'),
