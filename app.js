@@ -354,6 +354,13 @@ function runImageDiag(){
   owned.slice(0,3).forEach(c => samples.push({ label:'owned', number:c.number, name:c.name, hasImg:!!c.image }));
   samples.push({ label:'test', number:'FB05-054', name:'Son Gohan: Youth', hasImg:false });
   L.push('owned cards: ' + owned.length + ' · with a number: ' + owned.filter(c=>c.number).length);
+  // Show what the thumbnail renderer actually produces for the first few owned cards
+  L.push('--- thumbnail render check ---');
+  owned.slice(0,4).forEach(c=>{
+    let html=''; try { html = cardThumbHtml(c); } catch(e){ html='ERROR: '+e.message; }
+    const kind = html.startsWith('<img') ? 'IMG('+((html.match(/src="([^"]*)"/)||[])[1]||'').slice(0,50)+'…)' : (html.length<4?'PLACEHOLDER':html.slice(0,40));
+    L.push('  '+(c.name||c.number||'?')+' [num='+(c.number||'none')+'] → '+kind);
+  });
   out.textContent = L.join('\n') + '\n\nTesting image URLs…';
   // test each sample URL by actually trying to load it
   let pending = 0;

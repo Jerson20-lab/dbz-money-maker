@@ -4,8 +4,10 @@ Traceback (most recent call last):
   File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1329, in <module>
     test(
   File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1276, in test
-    with ServerClass(addr, HandlerClas127.0.0.1 - - [14/Sep/2026 06:24:00] "GET /index.html HTTP/1.1" 200 -
-aces/.local/share/mise/installs/python/3.12.14/lib/python3.12/socketserver.py", line 457, in __init__
+    with ServerClass(addr, HandlerClass) as httpd:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/agentsp127.0.0.1 - - [14/Sep/2026 06:31:53] "GET /index.html HTTP/1.1" 200 -
+rver.py", line 457, in __init__
     self.server_bind()
   File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1323, in server_bind
     return super().server_bind()
