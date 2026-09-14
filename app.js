@@ -927,13 +927,38 @@ let invExpanded = null; // item id whose min-sell table is open
 function invItemCard(it){ return Collection.getCard(it.cardKey) || {}; }
 // Thumbnail HTML for a card: prefer a saved image; else show the OFFICIAL image live
 // from the DB URL (works even if we can't cache it); else the placeholder.
+// ---- Image loading progress bar (top) ----
+const _imgProg = { total: 0, done: 0 };
+function imgProgStart(){
+  _imgProg.total++;
+  const bar = $('#img-progress'); if (bar) bar.classList.remove('hidden');
+  imgProgPaint();
+}
+function imgProgDone(){
+  _imgProg.done++;
+  imgProgPaint();
+  if (_imgProg.done >= _imgProg.total) {
+    setTimeout(()=>{ const bar=$('#img-progress'); if (bar && _imgProg.done>=_imgProg.total){ bar.classList.add('hidden'); _imgProg.total=0; _imgProg.done=0; } }, 400);
+  }
+}
+function imgProgPaint(){
+  const f = $('#img-progress-fill'); if (!f) return;
+  const pct = _imgProg.total ? Math.round(_imgProg.done/_imgProg.total*100) : 0;
+  f.style.width = pct + '%';
+}
+
 function cardThumbHtml(card){
   let src = (card && card.image) ? card.image : '';
   // Build the official image URL straight from the card number — no DB-loaded requirement.
   if (!src && card && card.number && window.CardDB && CardDB.imageUrl) {
     try { src = CardDB.imageUrl(card.number) || ''; } catch (e) {}
   }
-  if (src) return `<img src="${src}" alt="" loading="lazy" data-zoom="${src}" onerror="this.replaceWith(document.createTextNode('🃏'))">`;
+  if (src) {
+    // register with the top progress bar; onload/onerror report completion
+    if (src.startsWith('http')) { try { imgProgStart(); } catch(e){} }
+    const track = src.startsWith('http') ? ' onload="imgProgDone()" ' : '';
+    return `<img src="${src}"${track}alt="" loading="lazy" data-zoom="${src}" onerror="imgProgDone&&imgProgDone();this.replaceWith(document.createTextNode('🃏'))">`;
+  }
   return '🃏';
 }
 function invItemName(it){ const c = invItemCard(it); return c.name ? `${c.name}${c.number?' · '+c.number:''}` : (it.cardKey||'Card'); }

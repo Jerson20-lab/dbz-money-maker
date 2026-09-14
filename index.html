@@ -26,6 +26,7 @@
     </div>
 
     <!-- top bar -->
+    <div id="img-progress" class="img-progress hidden"><div id="img-progress-fill" class="img-progress-fill"></div></div>
     <header class="topbar">
       <div class="tb-title" id="view-title">Scan</div>
       <div class="tb-sub">Raw → Grade → Flip</div>
@@ -523,7 +524,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v8.2';
+    window.APP_VERSION = 'v8.3';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');
