@@ -330,9 +330,12 @@ function verifyPickCard(el){
   if (num && num.toUpperCase() !== (card.number||'').toUpperCase() && Collection.renameCard) {
     Collection.renameCard(key, { name: card.name, number: num });
   }
+  const newKey = (window.Collection && Collection.cardKey) ? Collection.cardKey({ name: card.name, number: num || card.number }) : key;
   Collection.upsertCard({ name: card.name, number: num || card.number, set: card.set,
     rarity: rarity || card.rarity, variant, language: card.language || 'EN',
-    image: card.image, dbVerified: true });
+    image: '', officialImage: false, dbVerified: true });   // clear old photo → official image will load
+  // fetch the crisp official image now that we have a confirmed number
+  if ((num || card.number)) cacheCardImage(newKey, num || card.number);
   renderVerifyList(); renderVerifyBadge(); renderInventory();
 }
 
@@ -992,16 +995,22 @@ function imgProgPaint(){
 }
 
 function cardThumbHtml(card){
-  let src = (card && card.image) ? card.image : '';
-  // Build the official image URL straight from the card number — no DB-loaded requirement.
-  if (!src && card && card.number && window.CardDB && CardDB.imageUrl) {
+  let src = '';
+  // Prefer the OFFICIAL card image (from the DB, by number) over the user's scan photo.
+  if (card && card.number && window.CardDB && CardDB.imageUrl) {
     try { src = CardDB.imageUrl(card.number) || ''; } catch (e) {}
   }
+  // Fall back to a saved photo (for cards with no number / not in DB).
+  if (!src && card && card.image) src = card.image;
   if (src) {
-    // register with the top progress bar; onload/onerror report completion
     if (src.startsWith('http')) { try { imgProgStart(); } catch(e){} }
     const track = src.startsWith('http') ? ' onload="imgProgDone()" ' : '';
-    return `<img src="${src}"${track}alt="" loading="lazy" data-zoom="${src}" onerror="imgProgDone&&imgProgDone();this.replaceWith(document.createTextNode('🃏'))">`;
+    // If the official URL fails, fall back to the saved photo (if any), else placeholder.
+    const fb = (card && card.image && card.image !== src) ? card.image : '';
+    const onerr = fb
+      ? `imgProgDone&&imgProgDone();this.onerror=null;this.src='${fb}';this.removeAttribute('data-zoom');this.setAttribute('data-zoom','${fb}')`
+      : `imgProgDone&&imgProgDone();this.replaceWith(document.createTextNode('🃏'))`;
+    return `<img src="${src}"${track}alt="" loading="lazy" data-zoom="${src}" onerror="${onerr}">`;
   }
   return '🃏';
 }
