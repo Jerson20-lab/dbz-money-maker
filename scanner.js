@@ -159,6 +159,72 @@ const Scanner = (function () {
     }
   }
 
+  /* ---------------- NUMBER-REGION OCR (multi-variant) ----------------
+   * The card number is tiny and the ONLY reliable primary ID. Instead of trusting
+   * one pass over the whole card, we crop BOTH bottom corners, upscale, and run
+   * several preprocessing variants — then keep the reading that matches a valid
+   * card-number grammar. This is what turns a garbled "C778" into "ST01-066".
+   */
+  // canvas-only preprocessing variants (no external lib):
+  function pxGray(src){ // grayscale + contrast stretch
+    const c=document.createElement('canvas'); c.width=src.width; c.height=src.height;
+    const x=c.getContext('2d'); x.drawImage(src,0,0);
+    const im=x.getImageData(0,0,c.width,c.height), d=im.data;
+    for(let i=0;i<d.length;i+=4){ let g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; g=(g-128)*1.5+128; g=g<0?0:g>255?255:g; d[i]=d[i+1]=d[i+2]=g; }
+    x.putImageData(im,0,0); return c;
+  }
+  function pxThreshold(src, inv){ // Otsu-ish global threshold
+    const c=document.createElement('canvas'); c.width=src.width; c.height=src.height;
+    const x=c.getContext('2d'); x.drawImage(src,0,0);
+    const im=x.getImageData(0,0,c.width,c.height), d=im.data;
+    // compute mean luminance as threshold
+    let sum=0,n=0; for(let i=0;i<d.length;i+=4){ sum+=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; n++; }
+    const t=sum/n;
+    for(let i=0;i<d.length;i+=4){ const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; let v=g>t?255:0; if(inv) v=255-v; d[i]=d[i+1]=d[i+2]=v; }
+    x.putImageData(im,0,0); return c;
+  }
+  function upscale(src, factor){
+    const c=document.createElement('canvas'); c.width=src.width*factor; c.height=src.height*factor;
+    const x=c.getContext('2d'); x.imageSmoothingEnabled=true; x.imageSmoothingQuality='high';
+    x.drawImage(src,0,0,c.width,c.height); return c;
+  }
+
+  // Given the (detected/cropped) card canvas, read the card number from both corners
+  // across multiple preprocessing variants. Returns {raw, normalized, valid} best match.
+  async function readNumberFromROIs(card){
+    const W=card.width, H=card.height;
+    // number sits in the bottom band, either corner. Grab generous crops.
+    const rois = [
+      crop(card, W*0.55, H*0.90, W*0.45, H*0.09),  // bottom-right (tight)
+      crop(card, W*0.50, H*0.86, W*0.50, H*0.13),  // bottom-right (loose)
+      crop(card, 0,      H*0.90, W*0.45, H*0.09),  // bottom-left (tight)
+      crop(card, 0,      H*0.86, W*0.50, H*0.13)   // bottom-left (loose)
+    ];
+    const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-', tessedit_pageseg_mode: '7' };
+    const tasks = [];
+    for (const roi of rois){
+      const up = upscale(roi, 4);
+      // 3 variants per ROI: gray, threshold, inverted-threshold
+      [pxGray(up), pxThreshold(up,false), pxThreshold(up,true)].forEach(v=>{
+        tasks.push(
+          Tesseract.recognize(v,'eng',numOpts)
+            .catch(()=>({data:{text:'',confidence:0}}))
+            .then(r=>({ text:(r.data.text||'').trim(), conf:r.data.confidence||0 }))
+        );
+      });
+    }
+    const results = await Promise.all(tasks);
+    // score every candidate by grammar validity + confidence
+    let best=null;
+    for (const r of results){
+      const ex = extractCardNumber(r.text);
+      if (!ex.normalized) continue;
+      const score = (ex.valid?3:0) + (r.conf/100) + (/^[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?$/.test(ex.normalized)?2:0);
+      if (!best || score>best.score) best = { ...ex, score, srcConf:r.conf };
+    }
+    return best || { raw:'', normalized:'', valid:false, score:0, srcConf:0 };
+  }
+
   /* ---------------- 2. OCR ----------------
    * Detect the card, crop to it, then OCR: (a) the full card for names/text, and
    * (b) a high-res bottom band with a restricted charset for the small card number.
@@ -167,19 +233,13 @@ const Scanner = (function () {
   async function ocrRegions(canvas) {
     const det = detectCard(canvas);
     const card = det.cropped;                 // cropped to the card (or full image if not found)
-    const pre = preprocess(card);
-    const W = pre.width, H = pre.height;
-    // bottom band (where the card number lives, both layouts) — upscale x2 for small text
-    const bandRaw = crop(pre, 0, H * 0.78, W, H * 0.22);
-    const band = document.createElement('canvas');
-    band.width = bandRaw.width * 2; band.height = bandRaw.height * 2;
-    band.getContext('2d').drawImage(bandRaw, 0, 0, band.width, band.height);
-    const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' };
-    const [fullR, bandR] = await Promise.all([
-      Tesseract.recognize(pre, 'eng'),
-      Tesseract.recognize(band, 'eng', numOpts).catch(() => Tesseract.recognize(band, 'eng'))
+    const W = card.width, H = card.height;
+    // Full-card OCR on the ORIGINAL (a hard contrast stretch tends to hurt foil cards).
+    // The number comes from the dedicated multi-variant ROI reader below, not this.
+    const [fullR, roiNum] = await Promise.all([
+      Tesseract.recognize(card, 'eng'),
+      readNumberFromROIs(card)
     ]);
-    // extract per-line text + vertical position from the full OCR (for name-finding)
     const lines = [];
     try {
       (fullR.data.lines || []).forEach(ln => {
@@ -189,10 +249,11 @@ const Scanner = (function () {
     } catch (e) {}
     return {
       full:   (fullR.data.text || '').trim(),
-      band:   (bandR.data.text || '').trim(),
+      roiNum,                                  // {raw, normalized, valid, score, srcConf}
+      band:   roiNum.raw || '',                // for rarity/variant hints
       lines,
       detected: det.found,
-      _conf: { full: fullR.data.confidence || 0, band: bandR.data.confidence || 0 }
+      _conf: { full: fullR.data.confidence || 0, band: roiNum.srcConf || 0 }
     };
   }
 
@@ -483,8 +544,9 @@ const Scanner = (function () {
     const nameRawPick = findCardName(raw.lines, raw.full);
     let nameCorrected = normalizeName(nameRawPick);
     // --- find the card number anywhere in the number band, then the full text ---
-    let number = extractCardNumber(raw.band);
-    if (!number.normalized) number = extractCardNumber(raw.full);
+    // Primary number = multi-variant ROI reader; fall back to full-card text.
+    let number = (raw.roiNum && raw.roiNum.normalized) ? raw.roiNum : extractCardNumber(raw.full);
+    if (!number.normalized) number = extractCardNumber(raw.band);
     // --- apply learned corrections (exact raw-key match only) ---
     nameCorrected = applyLearned('name', nameRawPick, nameCorrected);
     const learnedNum = applyLearned('number', number.raw, number.normalized);

@@ -11,9 +11,7 @@ Traceback (most recent call last):
   File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 1323, in server_bind
     return super().server_bind()
            ^^^^^^^^^^^^^^^^^^^^^
-  File "/agentspaces/.local/sh127.0.0.1 - - [14/Sep/2026 02:52:13] "GET /index.html HTTP/1.1" 200 -
-140, in server_bind
-    socketserver.TCPServer.server_bind(self)
-  File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/socketserver.py", line 478, in server_bind
+  File "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/http/server.py", line 127.0.0.1 - - [14/Sep/2026 03:05:54] "GET /index.html HTTP/1.1" 200 -
+e "/agentspaces/.local/share/mise/installs/python/3.12.14/lib/python3.12/socketserver.py", line 478, in server_bind
     self.socket.bind(self.server_address)
 OSError: [Errno 98] Address already in use
