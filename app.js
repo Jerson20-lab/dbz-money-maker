@@ -925,6 +925,17 @@ let invSearch = '';
 let invExpanded = null; // item id whose min-sell table is open
 
 function invItemCard(it){ return Collection.getCard(it.cardKey) || {}; }
+// Thumbnail HTML for a card: prefer a saved image; else show the OFFICIAL image live
+// from the DB URL (works even if we can't cache it); else the placeholder.
+function cardThumbHtml(card){
+  let src = (card && card.image) ? card.image : '';
+  // Build the official image URL straight from the card number — no DB-loaded requirement.
+  if (!src && card && card.number && window.CardDB && CardDB.imageUrl) {
+    try { src = CardDB.imageUrl(card.number) || ''; } catch (e) {}
+  }
+  if (src) return `<img src="${src}" alt="" loading="lazy" data-zoom="${src}" onerror="this.replaceWith(document.createTextNode('🃏'))">`;
+  return '🃏';
+}
 function invItemName(it){ const c = invItemCard(it); return c.name ? `${c.name}${c.number?' · '+c.number:''}` : (it.cardKey||'Card'); }
 function invGradeLabel(it){
   if (it.condition === 'graded') return `${it.company||'?'} ${it.grade||''}`.trim();
@@ -944,7 +955,9 @@ function renderInventory(){
   const all = (Collection.items ? Collection.items() : []);
   const filtered = all.filter(it => {
     const st = it.status || 'in_inventory';
-    if (invStatusFilter !== 'all' && st !== invStatusFilter) return false;
+    // Default 'all' = everything you still HOLD (exclude sold). Pick the 'sold' filter to see sold.
+    if (invStatusFilter === 'all') { if (st === 'sold') return false; }
+    else if (st !== invStatusFilter) return false;
     if (invSearch) { const nm = invItemName(it).toLowerCase(); if (!nm.includes(invSearch.toLowerCase())) return false; }
     return true;
   });
@@ -1036,7 +1049,7 @@ function renderInvStack(group){
   const sub = items.map(it => renderInvItemRow(it, true)).join('');
   return `<div class="inv-item inv-stack" data-inv-stack="${group.key}">
       <div class="inv-item-head" data-action="inv-expand" data-id="${group.key}">
-        <div class="inv-thumb">${c.image?`<img src="${c.image}" alt="">`:'🃏'}</div>
+        <div class="inv-thumb">${cardThumbHtml(c)}</div>
         <div class="inv-item-main">
           <div class="inv-item-name">${escapeHtmlSafe(invItemName(first))} <span class="inv-stack-badge">×${totalQty}</span></div>
           <div class="inv-item-sub">${invGradeLabel(first)} · ${items.length} entries · <span class="inv-badge inv-${st}">${Inventory.statusLabel(st)}</span></div>
@@ -1064,14 +1077,14 @@ function renderInvItemRow(it, forceExpanded){
     } else if (p.potentialProfit!=null) {
       profitLine = `<span class="${p.potentialProfit>=0?'pos':'neg'}">Potential ${money(p.potentialProfit)}${p.potentialRoi!=null?` (${p.potentialRoi}%)`:''}</span>`;
     } else {
-      profitLine = `<span class="muted">No market value yet — refresh prices</span>`;
+      profitLine = `<span class="muted">Sell above ${money(be)} to profit</span>`;
     }
     const table = expanded ? `<div class="inv-minsell">`+
       Inventory.minSellTable(it).map(r=>`<div class="inv-ms-row"><span>${r.label}</span><b>${money(r.price)}</b></div>`).join('')+
       `<div class="inv-ms-note">Break-even & margins include selling fees (${Inventory.settings().feePct}% + $${Inventory.settings().feeFlat}).</div></div>` : '';
     return `<div class="inv-item" data-inv-id="${it.id}">
       <div class="inv-item-head"${forceExpanded ? '' : ` data-action="inv-expand" data-id="${it.id}"`}>
-        <div class="inv-thumb">${(()=>{const c=invItemCard(it); return c.image?`<img src="${c.image}" alt="">`:'🃏';})()}</div>
+        <div class="inv-thumb">${cardThumbHtml(invItemCard(it))}</div>
         <div class="inv-item-main">
           <div class="inv-item-name">${escapeHtmlSafe(invItemName(it))}</div>
           <div class="inv-item-sub">${invGradeLabel(it)} · qty ${it.qty||1} · <span class="inv-badge inv-${st}">${Inventory.statusLabel(st)}</span></div>
@@ -1857,7 +1870,7 @@ function openCardDetail(key){
   currentCardKey = key;
   const card = Collection.getCard(key) || {};
   $('#cd-name').textContent = card.name || 'Card';
-  const th = $('#cd-thumb'); if (th) th.innerHTML = card.image ? `<img src="${card.image}" alt="">` : '🃏';
+  const th = $('#cd-thumb'); if (th) th.innerHTML = cardThumbHtml(card);
   $('#cd-meta').textContent = [card.number, card.set, card.variant, card.rarity, card.language].filter(Boolean).join(' · ');
 
   // raw table
@@ -1938,7 +1951,15 @@ function importCollection(file){
 
 /* ---------- events ---------- */
 document.body.addEventListener('click', e => {
+  // Tap a card image to enlarge it (before other handlers).
+  const zoomEl = e.target.closest('[data-zoom]');
+  if (zoomEl && zoomEl.dataset.zoom) {
+    const zi = $('#img-zoom-img'); if (zi) zi.src = zoomEl.dataset.zoom;
+    $('#img-zoom').classList.remove('hidden');
+    e.stopPropagation(); return;
+  }
   const a = e.target.closest('[data-action]'); const t = e.target.closest('[data-view]');
+  if (a && a.dataset.action === 'img-zoom-close') { $('#img-zoom').classList.add('hidden'); return; }
   if (t) { showView(t.dataset.view); return; }
   if (!a) return;
   const map = {

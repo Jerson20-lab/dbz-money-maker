@@ -311,3 +311,8 @@ select#grader-select,select#service-select{width:100%;padding:12px;border-radius
 .topbar{position:relative}
 .verify-badge{position:absolute;top:10px;right:12px;background:#d29922;color:#0d1117;border:none;border-radius:14px;padding:3px 9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:3px}
 .verify-badge span{background:#0d1117;color:#f5e6b8;border-radius:8px;padding:0 5px;font-size:11px}
+
+/* ---- Card image zoom lightbox ---- */
+.img-zoom{position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px}
+.img-zoom img{max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.6)}
+.inv-thumb img{cursor:zoom-in}
