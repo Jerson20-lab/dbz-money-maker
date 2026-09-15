@@ -10,9 +10,35 @@ const pct = n => (isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(0) + '%' : '—'
 
 const state = {
   scan: { name: '', code: '' },
-  saved: JSON.parse(localStorage.getItem('dbz.saved') || '[]')
+  saved: JSON.parse(localStorage.getItem('dbz.saved') || '[]'),
+  // Which pack (session) a pending scan should be added to as a pull.
+  // Persisted so an iOS reload/crash mid-scan can't detach the pull from its pack.
+  pullTarget: (function(){ try { return JSON.parse(localStorage.getItem('dbz.pullTarget') || 'null'); } catch(e){ return null; } })()
 };
 function save() { localStorage.setItem('dbz.saved', JSON.stringify(state.saved)); }
+
+// Global safety net: if anything throws unexpectedly (e.g. an OCR hiccup),
+// surface a readable message and dismiss any stuck loader instead of leaving
+// the app looking dead/frozen.
+window.addEventListener('error', function(ev){
+  try { if (typeof hideLoader === 'function') hideLoader(); } catch(e){}
+  try {
+    const el = document.querySelector('#ocr-status');
+    if (el) { el.classList.remove('hidden'); el.classList.add('err');
+      el.textContent = 'Something went wrong — try again, or type the card in manually.'; }
+  } catch(e){}
+});
+window.addEventListener('unhandledrejection', function(){
+  try { if (typeof hideLoader === 'function') hideLoader(); } catch(e){}
+});
+// Persist/clear the active pull target so it survives a page reload or crash.
+function setPullTarget(t){
+  state.pullTarget = t;
+  try {
+    if (t) localStorage.setItem('dbz.pullTarget', JSON.stringify(t));
+    else localStorage.removeItem('dbz.pullTarget');
+  } catch (e) {}
+}
 
 /* ---------- Price memory (keyless "automation") ----------
    Remembers the last prices you entered for each card, keyed by name+code+grader.
@@ -104,13 +130,15 @@ function showView(v) {
 let stream = null;
 async function startCam() {
   try {
-    // Request the highest resolution the back camera offers + continuous autofocus.
-    // More pixels = the small card number reads far better.
+    // Request a MODERATE resolution back camera + continuous autofocus.
+    // NOTE: 4K (3840x2160 ~= 33MP) frames caused iOS to kill the PWA tab on
+    // capture (out-of-memory). 1080p is plenty for the card-number OCR and is
+    // far lighter on memory, so capture no longer crashes.
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width:  { ideal: 3840 },
-        height: { ideal: 2160 },
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
         focusMode: 'continuous'
       }
     }).catch(() => navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }));
@@ -151,8 +179,15 @@ function ocrStatus(msg, err) {
 
 async function captureFromVideo() {
   const v = $('#cam'); if (!v.videoWidth) { ocrStatus('Camera not ready yet.', true); return; }
-  const c = $('#cap-canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0);
+  // Cap the captured frame size. A very large frame (e.g. 4K) can spike memory
+  // enough for iOS to kill the tab mid-scan. 1600px on the long edge is more
+  // than enough resolution for the card-number OCR.
+  const MAX_EDGE = 1600;
+  const scale = Math.min(1, MAX_EDGE / Math.max(v.videoWidth, v.videoHeight));
+  const c = $('#cap-canvas');
+  c.width = Math.round(v.videoWidth * scale);
+  c.height = Math.round(v.videoHeight * scale);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
   await runOcr(c);
 }
 
@@ -486,12 +521,12 @@ function confirmVerifiedCard(dest){
   if (state.pullTarget && state.pullTarget.sessionId) {
     const sid = state.pullTarget.sessionId;
     for (let i=0;i<qty;i++) addPullCard(sid, { name, number, set, variant, rarity, language, image, dbVerified: true });
-    state.pullTarget = null;
+    setPullTarget(null);
     $('#verify-screen').classList.add('hidden');
     $('#scan-result').classList.add('hidden');
     if (confirm(`✓ Added ${qty>1?qty+'× ':''}${name} as a pull.\n\nScan another pull?`)) {
       // re-target the same session for the next scan
-      state.pullTarget = { sessionId: sid };
+      setPullTarget({ sessionId: sid });
       resetScanForNext();
       showView('scan');
     } else {
@@ -1805,7 +1840,7 @@ function addPullToSession(sessionId){
   const wantScan = confirm('Add this pull by SCANNING the card?\n\nOK = Scan   ·   Cancel = Type it in');
   if (wantScan) {
     // Route to the Scan tab; when the scan is confirmed, it'll be added as a pull to this session.
-    state.pullTarget = { sessionId };
+    setPullTarget({ sessionId });
     resetScanForNext();
     showView('scan');
     return;
@@ -2245,6 +2280,17 @@ try {
 } catch (e) {}
 
 renderGradeInputs();
+
+// If a pull scan was interrupted (reload/crash), only keep the pull target if
+// its session still exists and is still open; otherwise discard it so a normal
+// scan doesn't get wrongly attached to a stale pack.
+try {
+  if (state.pullTarget && state.pullTarget.sessionId) {
+    const s = window.Products && Products.getSession(state.pullTarget.sessionId);
+    if (!s || s.closed) setPullTarget(null);
+  }
+} catch (e) { setPullTarget(null); }
+
 showView('scan');
 
 // cosmetic icon splash on open (~1.3s)
