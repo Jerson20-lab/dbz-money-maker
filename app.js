@@ -193,12 +193,30 @@ async function captureFromVideo() {
 
 async function ocrFromFile(file) {
   const img = new Image();
+  const url = URL.createObjectURL(file);
   img.onload = async () => {
-    const c = $('#cap-canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
-    c.getContext('2d').drawImage(img, 0, 0);
-    await runOcr(c);
+    try {
+      // Cap the source size before drawing. Library photos are often 12MP+
+      // (e.g. 4032x3024) which can spike memory enough for iOS to kill the tab.
+      // 1600px on the long edge is plenty for the card-number OCR.
+      const MAX_EDGE = 1600;
+      const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = $('#cap-canvas');
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      await runOcr(c);
+    } catch (e) {
+      ocrStatus('Could not read that photo. Try a clearer one or type the card in manually.', true);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   };
-  img.src = URL.createObjectURL(file);
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    ocrStatus('Could not open that photo. Try a different image.', true);
+  };
+  img.src = url;
 }
 
 /* Read only two regions: top strip (name) and bottom-right (card code). Faster + more accurate. */
@@ -1501,9 +1519,15 @@ async function scanIntoAddCard(file){
   showLoader('Reading card…');
   try {
     const img = new Image();
-    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = URL.createObjectURL(file); });
-    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
-    c.getContext('2d').drawImage(img, 0, 0);
+    const _u = URL.createObjectURL(file);
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = _u; });
+    // Cap source size to avoid iOS out-of-memory tab kills on large library photos.
+    const MAX_EDGE = 1600;
+    const _sc = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * _sc); c.height = Math.round(img.naturalHeight * _sc);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(_u);
     let name, code;
     if (typeof Scanner !== 'undefined') {
       const r = await Scanner.scan(c);
