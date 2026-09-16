@@ -182,7 +182,7 @@ async function captureFromVideo() {
   // Cap the captured frame size. A very large frame (e.g. 4K) can spike memory
   // enough for iOS to kill the tab mid-scan. 1600px on the long edge is more
   // than enough resolution for the card-number OCR.
-  const MAX_EDGE = 1800;
+  const MAX_EDGE = 4096;
   const scale = Math.min(1, MAX_EDGE / Math.max(v.videoWidth, v.videoHeight));
   const c = $('#cap-canvas');
   c.width = Math.round(v.videoWidth * scale);
@@ -196,10 +196,13 @@ async function ocrFromFile(file) {
   const url = URL.createObjectURL(file);
   img.onload = async () => {
     try {
-      // Cap the source size before drawing. Library photos are often 12MP+
-      // (e.g. 4032x3024) which can spike memory enough for iOS to kill the tab.
-      // 1600px on the long edge is plenty for the card-number OCR.
-      const MAX_EDGE = 1800;
+      // Keep the source at (near) FULL resolution so the small card number stays
+      // crisp — downscaling here was destroying number detail and causing
+      // misreads. Memory is safe now because OCR only ever runs on small CROPS
+      // (card-number ROIs), never the whole image, and OCR passes are batched.
+      // We still guard against absurdly huge images (rare) to avoid a canvas that
+      // itself is too big to allocate.
+      const MAX_EDGE = 4096;   // generous: modern iPhone photos (~4032px) pass through untouched
       const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
       const c = $('#cap-canvas');
       c.width = Math.round(img.naturalWidth * scale);
@@ -627,6 +630,7 @@ function renderScanResult(r){
     dg += `card box: ${d.cardBox||'?'}  ratio: ${d.cardRatio!=null?d.cardRatio:'?'} (card~0.714)  fill: ${d.cardFill!=null?d.cardFill:'?'}\n`;
     dg += `\n--- NAME ---\n`;
     dg += `name-finder picked: "${d.namePicked}"\n`;
+    dg += `name ROI reads: ${d.nameRoiReads||'(none)'}\n`;
     dg += `after normalize:    "${d.nameCorrected}"\n`;
     dg += `\n--- NUMBER (ROI reader) ---\n`;
     dg += `raw read:   "${d.numberRaw}"\n`;
@@ -1544,7 +1548,7 @@ async function scanIntoAddCard(file){
     const _u = URL.createObjectURL(file);
     await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = _u; });
     // Cap source size to avoid iOS out-of-memory tab kills on large library photos.
-    const MAX_EDGE = 1800;
+    const MAX_EDGE = 4096;
     const _sc = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement('canvas');
     c.width = Math.round(img.naturalWidth * _sc); c.height = Math.round(img.naturalHeight * _sc);

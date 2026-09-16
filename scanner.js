@@ -279,6 +279,34 @@ const Scanner = (function () {
     return out;
   }
 
+  // Read the card NAME from targeted regions with name-appropriate OCR settings,
+  // instead of relying on noisy whole-card OCR. Card layouts differ, so we read
+  // BOTH likely name zones and return all candidate strings:
+  //   - Masters: name at the TOP (~y 0-0.16)
+  //   - Fusion World: name at the BOTTOM-LEFT (~y 0.86-0.97, left ~72%)
+  async function readNameFromROIs(card){
+    const W=card.width, H=card.height;
+    const zones = [
+      crop(card, 0,      0,       W,      H*0.16),   // top (Masters)
+      crop(card, 0,      H*0.86,  W*0.72, H*0.11)    // bottom-left (Fusion World)
+    ];
+    const nameOpts = { tessedit_char_whitelist:
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .:,\'-!&', tessedit_pageseg_mode: '6' };
+    const MAX_UP_W = 1400;
+    const out = [];
+    for (const z of zones){
+      let factor = 3;
+      if (z.width * factor > MAX_UP_W) factor = Math.max(1, MAX_UP_W / z.width);
+      const up = upscale(z, factor);
+      try {
+        const r = await Tesseract.recognize(pxGray(up), 'eng', nameOpts);
+        const t = (r.data.text || '').replace(/\s+/g,' ').trim();
+        if (t) out.push({ text: t, conf: r.data.confidence || 0 });
+      } catch(e){}
+    }
+    return out;
+  }
+
   /* ---------------- 2. OCR ----------------
    * Detect the card, crop to it, then OCR: (a) the full card for names/text, and
    * (b) a high-res bottom band with a restricted charset for the small card number.
@@ -288,22 +316,33 @@ const Scanner = (function () {
     const det = detectCard(canvas);
     const card = det.cropped;                 // cropped to the card (or full image if not found)
     const W = card.width, H = card.height;
-    // Full-card OCR on the ORIGINAL (a hard contrast stretch tends to hurt foil cards).
-    // The number comes from the dedicated multi-variant ROI reader below, not this.
+    // The full-card OCR (for name lines + full text) does NOT need full detail, so
+    // run it on a size-capped copy to keep memory + time down. The card NUMBER is
+    // read separately from FULL-RESOLUTION ROIs (readNumberFromROIs), where detail
+    // matters most — this is what keeps small numbers crisp.
+    const FULL_CAP = 1400;
+    let fullSrc = card;
+    if (Math.max(W, H) > FULL_CAP) {
+      const s = FULL_CAP / Math.max(W, H);
+      fullSrc = upscale(card, s);             // upscale() scales by factor; s<1 downscales
+    }
     const [fullR, roiNum] = await Promise.all([
-      Tesseract.recognize(card, 'eng'),
-      readNumberFromROIs(card)
+      Tesseract.recognize(fullSrc, 'eng'),
+      readNumberFromROIs(card)                // uses full-res card crop
     ]);
+    const nameRois = await readNameFromROIs(card);  // uses full-res card crop
     const lines = [];
+    const fullH = fullSrc.height || H;
     try {
       (fullR.data.lines || []).forEach(ln => {
         const t = (ln.text || '').trim();
-        if (t) lines.push({ text: t, conf: ln.confidence || 0, yTop: (ln.bbox ? ln.bbox.y0 : 0) / H });
+        if (t) lines.push({ text: t, conf: ln.confidence || 0, yTop: (ln.bbox ? ln.bbox.y0 : 0) / fullH });
       });
     } catch (e) {}
     return {
       full:   (fullR.data.text || '').trim(),
       roiNum,                                  // {raw, normalized, valid, score, srcConf}
+      nameRois,                                // [{text,conf}] from targeted name zones
       band:   roiNum.raw || '',                // for rarity/variant hints
       lines,
       detected: det.found,
@@ -614,8 +653,14 @@ const Scanner = (function () {
     let fullTextDbHit = null;
     try {
       if (typeof window !== 'undefined' && window.CardDB) {
-        const txt = (raw.full || '').toUpperCase().replace(/[:._]/g, '-');
-        const toks = txt.match(/[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?/g) || [];
+        // Normalize OCR symbol noise that commonly mangles a leading letter or the
+        // dash: £/€/E-lookalikes -> E, various dashes -> '-'. Energy-marker numbers
+        // like "E-48" often OCR as "£-48" / "E—48".
+        const txt = (raw.full || '').toUpperCase()
+          .replace(/[£€]/g, 'E')
+          .replace(/[:._~–—]/g, '-');
+        // Card numbers (PREFIX-NNN) AND short energy-marker codes (E-NN).
+        const toks = txt.match(/[A-Z]{1,4}[0-9]{0,2}-[0-9]{1,3}[A-Z]?/g) || [];
         for (const tk of toks){
           const hit = window.CardDB.bestMatch(tk);
           if (hit && hit.distance === 0){ fullTextDbHit = hit; break; }      // exact wins
@@ -651,12 +696,20 @@ const Scanner = (function () {
           number = { raw: number.raw, normalized: m.card.number, valid: true, dbMatched: true, dbDistance: m.distance };
         }
       }
-      // 3) Last resort: match the OCR'd NAME against the DB.
+      // 3) Last resort: match the OCR'd NAME against the DB. Prefer the targeted
+      // name-zone reads (top strip + bottom-left strip) over the noisy whole-card
+      // name pick, since those regions avoid the card art.
       if (!dbCard && typeof window !== 'undefined' && window.CardDB && window.CardDB.matchByName) {
-        const mn = window.CardDB.matchByName(nameRawPick) || window.CardDB.matchByName(nameCorrected);
-        if (mn) {
-          dbCard = mn.card;
-          number = { raw: number.raw, normalized: mn.card.number, valid: true, dbMatched: true, dbDistance: mn.distance, byName: true };
+        const nameTries = [];
+        (raw.nameRois || []).forEach(n => { if (n && n.text) nameTries.push(n.text); });
+        nameTries.push(nameRawPick, nameCorrected);
+        for (const cand of nameTries){
+          const mn = window.CardDB.matchByName(cand);
+          if (mn){
+            dbCard = mn.card;
+            number = { raw: number.raw, normalized: mn.card.number, valid: true, dbMatched: true, dbDistance: mn.distance, byName: true };
+            break;
+          }
         }
       }
     } catch (e) {}
@@ -680,8 +733,14 @@ const Scanner = (function () {
     const candidates = await matchCandidates(scanObj);
     const top = candidates[0] || null;
     const confidence = confidenceFor(scanObj, top);
-    // DB match is strong evidence — boost overall confidence if we snapped to a known card.
-    if (dbCard) confidence.overall = Math.max(confidence.overall, number.dbDistance === 0 ? 0.97 : 0.9);
+    // DB match strength: a NUMBER match is authoritative; a NAME-only match may
+    // be the wrong printing (same name, different set), so keep it lower and flag
+    // it for verification.
+    if (dbCard) {
+      if (number.byName) confidence.overall = Math.min(confidence.overall || 0.6, 0.6);
+      else if (number.fromFullText) confidence.overall = Math.max(confidence.overall, number.dbDistance === 0 ? 0.97 : 0.85);
+      else confidence.overall = Math.max(confidence.overall, number.dbDistance === 0 ? 0.97 : 0.9);
+    }
 
     return {
       detected: raw.detected,
@@ -704,7 +763,7 @@ const Scanner = (function () {
       matchScore: top ? top.score : 0,
       matchWhy: top ? top.why : [],
       alternativeMatches: candidates.slice(1).map(c => ({ card: c.card, score: c.score })),
-      needsVerification: !top || top.score < 100,   // anything less than exact = verify
+      needsVerification: !!number.byName || !top || top.score < 100,   // name-only match or non-exact = verify
       // ---- confidence ----
       confidence,
       // ---- meta ----
@@ -720,6 +779,7 @@ const Scanner = (function () {
         lines: (raw.lines || []).slice(0, 40).map(l => ({ text: (l.text||'').slice(0,60), conf: Math.round(l.conf), yTop: +(l.yTop||0).toFixed(2) })),
         namePicked: nameRawPick,
         nameCorrected: nameCorrected,
+        nameRoiReads: (raw.nameRois || []).map(n => `${n.text} (${Math.round(n.conf)}%)`).join(' | '),
         numberRaw: (raw.roiNum && raw.roiNum.raw) || '',
         numberNormalized: number.normalized || '',
         numberValid: !!number.valid,
