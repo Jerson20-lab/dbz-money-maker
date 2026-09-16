@@ -640,7 +640,26 @@ const Scanner = (function () {
       confidence,
       // ---- meta ----
       image: null,   // filled by caller (keeps scanner decoupled from thumb helper)
-      elapsedMs: Date.now() - t0
+      elapsedMs: Date.now() - t0,
+      // ---- DIAGNOSTIC: everything we saw, for troubleshooting a bad read ----
+      _diag: {
+        cardDetected: raw.detected,
+        fullText: raw.full,
+        lines: (raw.lines || []).map(l => ({ text: l.text, conf: Math.round(l.conf), yTop: +(l.yTop||0).toFixed(2) })),
+        namePicked: nameRawPick,
+        nameCorrected: nameCorrected,
+        numberRaw: (raw.roiNum && raw.roiNum.raw) || '',
+        numberNormalized: number.normalized || '',
+        numberValid: !!number.valid,
+        numberScore: (raw.roiNum && raw.roiNum.score) || 0,
+        rarityText: (raw.roiNum && raw.roiNum.rarityText) || '',
+        dbMatched: !!dbCard,
+        dbBy: dbCard ? (number.byName ? 'NAME' : 'NUMBER') : 'none',
+        dbCardName: dbCard ? dbCard.name : '',
+        dbCardNumber: dbCard ? dbCard.number : '',
+        dbDistance: (number.dbDistance != null ? number.dbDistance : ''),
+        confidenceOverall: confidence.overall
+      }
     };
   }
 

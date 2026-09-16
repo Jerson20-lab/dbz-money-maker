@@ -619,6 +619,27 @@ function renderScanResult(r){
   }
   // raw OCR (collapsed, for transparency — never overwritten)
   html += `<details class="sc-raw"><summary>Raw OCR (unedited)</summary><pre>name: ${escapeHtmlSafe(r.rawOcr.name)}\nnumber: ${escapeHtmlSafe(r.rawOcr.number)}\nbottom: ${escapeHtmlSafe(r.rawOcr.bottom)}</pre></details>`;
+  // FULL SCAN DIAGNOSTIC — shows every stage so a bad read can be understood.
+  if (r._diag) {
+    const d = r._diag;
+    let dg = '';
+    dg += `card detected: ${d.cardDetected ? 'YES' : 'NO (used full image)'}\n`;
+    dg += `\n--- NAME ---\n`;
+    dg += `name-finder picked: "${d.namePicked}"\n`;
+    dg += `after normalize:    "${d.nameCorrected}"\n`;
+    dg += `\n--- NUMBER (ROI reader) ---\n`;
+    dg += `raw read:   "${d.numberRaw}"\n`;
+    dg += `normalized: "${d.numberNormalized}"  valid:${d.numberValid}  score:${d.numberScore}\n`;
+    dg += `rarity text: "${d.rarityText}"\n`;
+    dg += `\n--- DATABASE MATCH ---\n`;
+    dg += `matched: ${d.dbMatched ? 'YES' : 'NO'}  by:${d.dbBy}  distance:${d.dbDistance}\n`;
+    if (d.dbMatched) dg += `-> ${d.dbCardName} (${d.dbCardNumber})\n`;
+    dg += `overall confidence: ${Math.round((d.confidenceOverall||0)*100)}%\n`;
+    dg += `\n--- ALL OCR LINES (text · conf% · yTop 0=top 1=bottom) ---\n`;
+    (d.lines||[]).forEach(l => { dg += `[${String(l.conf).padStart(3)}%] y=${l.yTop}  ${l.text}\n`; });
+    dg += `\n--- FULL OCR TEXT ---\n${d.fullText}\n`;
+    html += `<details class="sc-raw" open><summary>🩺 Scan diagnostic (why it read this)</summary><pre style="white-space:pre-wrap;font-size:11px;max-height:340px;overflow:auto">${escapeHtmlSafe(dg)}</pre></details>`;
+  }
   html += `</div>`;
   el.innerHTML = html;
 }
