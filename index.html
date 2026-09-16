@@ -512,7 +512,20 @@
   <script src="scanner.js"></script>
   <script src="app.js"></script>
   <script>
-    if ('serviceWorker' in navigator) window.addEventListener('load', () => {
+    // SAFE MODE: open the app with ?safe=1 to bypass the service worker entirely
+    // (unregister it + clear caches). Use this if the app is stuck crash-looping;
+    // it isolates whether the crash is the SW/cached state vs the app code.
+    (function(){
+      try {
+        if (location.search.indexOf('safe=1') !== -1 && 'serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+          if (window.caches && caches.keys) caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
+          window.__SAFE_MODE__ = true;
+          console.log('SAFE MODE: service worker + caches cleared');
+        }
+      } catch (e) {}
+    })();
+    if ('serviceWorker' in navigator && !window.__SAFE_MODE__) window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').then(reg => {
         reg.update();
         document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update(); });
@@ -538,7 +551,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v8.21';
+    window.APP_VERSION = 'v8.23';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

@@ -223,19 +223,36 @@ const Scanner = (function () {
       crop(card, 0,      H*0.86, W,      H*0.12)
     ];
     const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-', tessedit_pageseg_mode: '7' };
-    const tasks = [];
+    // Build the preprocessed variant canvases. IMPORTANT (iOS memory): cap the
+    // upscaled size. A 4x upscale of a wide full-width strip on a 2200px photo
+    // is ~8800px wide and, times many ROIs run in parallel, crashes the tab.
+    // So we scale the factor down for large ROIs and cap the final width.
+    const MAX_UP_W = 1600;
+    const variants = [];
     for (const roi of rois){
-      const up = upscale(roi, 4);
-      // 3 variants per ROI: gray, threshold, inverted-threshold
-      [pxGray(up), pxThreshold(up,false), pxThreshold(up,true)].forEach(v=>{
-        tasks.push(
-          Tesseract.recognize(v,'eng',numOpts)
-            .catch(()=>({data:{text:'',confidence:0}}))
-            .then(r=>({ text:(r.data.text||'').trim(), conf:r.data.confidence||0 }))
-        );
-      });
+      let factor = 4;
+      if (roi.width * factor > MAX_UP_W) factor = Math.max(1, MAX_UP_W / roi.width);
+      const up = upscale(roi, factor);
+      variants.push(pxGray(up), pxThreshold(up,false), pxThreshold(up,true));
     }
-    const results = await Promise.all(tasks);
+    // Run OCR in SMALL BATCHES instead of all at once, so we never hold dozens
+    // of Tesseract workers + big canvases in memory simultaneously.
+    async function recognizeOne(v){
+      try { const r = await Tesseract.recognize(v,'eng',numOpts);
+        return { text:(r.data.text||'').trim(), conf:r.data.confidence||0 }; }
+      catch(e){ return { text:'', conf:0 }; }
+    }
+    const results = [];
+    const BATCH = 3;
+    for (let i=0;i<variants.length;i+=BATCH){
+      const chunk = variants.slice(i, i+BATCH);
+      const rs = await Promise.all(chunk.map(recognizeOne));
+      results.push(...rs);
+      // If we already have a confident, grammar-valid hit, stop early — saves
+      // both time and memory on the remaining ROIs.
+      const good = rs.some(r=>{ const ex=extractCardNumber(r.text); return ex.valid && /^[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?$/.test(ex.normalized) && r.conf>60; });
+      if (good) break;
+    }
     // score every candidate by grammar validity + confidence
     let best=null;
     for (const r of results){
@@ -699,8 +716,8 @@ const Scanner = (function () {
         cardBox: raw.detBox ? `${Math.round(raw.detBox.w)}x${Math.round(raw.detBox.h)}` : '',
         cardRatio: raw.detRatio,
         cardFill: raw.detFill,
-        fullText: raw.full,
-        lines: (raw.lines || []).map(l => ({ text: l.text, conf: Math.round(l.conf), yTop: +(l.yTop||0).toFixed(2) })),
+        fullText: (raw.full || '').slice(0, 1500),
+        lines: (raw.lines || []).slice(0, 40).map(l => ({ text: (l.text||'').slice(0,60), conf: Math.round(l.conf), yTop: +(l.yTop||0).toFixed(2) })),
         namePicked: nameRawPick,
         nameCorrected: nameCorrected,
         numberRaw: (raw.roiNum && raw.roiNum.raw) || '',

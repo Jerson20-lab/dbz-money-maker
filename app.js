@@ -182,7 +182,7 @@ async function captureFromVideo() {
   // Cap the captured frame size. A very large frame (e.g. 4K) can spike memory
   // enough for iOS to kill the tab mid-scan. 1600px on the long edge is more
   // than enough resolution for the card-number OCR.
-  const MAX_EDGE = 2200;
+  const MAX_EDGE = 1800;
   const scale = Math.min(1, MAX_EDGE / Math.max(v.videoWidth, v.videoHeight));
   const c = $('#cap-canvas');
   c.width = Math.round(v.videoWidth * scale);
@@ -199,7 +199,7 @@ async function ocrFromFile(file) {
       // Cap the source size before drawing. Library photos are often 12MP+
       // (e.g. 4032x3024) which can spike memory enough for iOS to kill the tab.
       // 1600px on the long edge is plenty for the card-number OCR.
-      const MAX_EDGE = 2200;
+      const MAX_EDGE = 1800;
       const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
       const c = $('#cap-canvas');
       c.width = Math.round(img.naturalWidth * scale);
@@ -1544,7 +1544,7 @@ async function scanIntoAddCard(file){
     const _u = URL.createObjectURL(file);
     await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = _u; });
     // Cap source size to avoid iOS out-of-memory tab kills on large library photos.
-    const MAX_EDGE = 2200;
+    const MAX_EDGE = 1800;
     const _sc = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement('canvas');
     c.width = Math.round(img.naturalWidth * _sc); c.height = Math.round(img.naturalHeight * _sc);
