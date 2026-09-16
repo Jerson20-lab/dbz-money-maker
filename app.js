@@ -624,6 +624,7 @@ function renderScanResult(r){
     const d = r._diag;
     let dg = '';
     dg += `card detected: ${d.cardDetected ? 'YES' : 'NO (used full image)'}\n`;
+    dg += `card box: ${d.cardBox||'?'}  ratio: ${d.cardRatio!=null?d.cardRatio:'?'} (card~0.714)  fill: ${d.cardFill!=null?d.cardFill:'?'}\n`;
     dg += `\n--- NAME ---\n`;
     dg += `name-finder picked: "${d.namePicked}"\n`;
     dg += `after normalize:    "${d.nameCorrected}"\n`;

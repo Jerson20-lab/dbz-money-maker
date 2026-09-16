@@ -19,6 +19,21 @@ const CardDB = (function () {
   const LEARN_KEY = 'dbz.carddb.learned';
 
   function norm(n){ return (n || '').toUpperCase().replace(/[^A-Z0-9-]/g, ''); }
+  // Card-number-aware normalization: in the DIGIT part (after the dash), fix the
+  // most common OCR letter->digit confusions (O->0, I/L->1, S->5, B->8, Z->2,
+  // G->6). This turns reads like "SB02-OO8" into "SB02-008" as an EXACT match,
+  // instead of relying on fuzzy distance (which is ambiguous for such cases).
+  function normNum(n){
+    let s = norm(n);
+    const dash = s.indexOf('-');
+    if (dash < 0) return s;
+    const head = s.slice(0, dash + 1);
+    let tail = s.slice(dash + 1)
+      .replace(/O/g,'0').replace(/[IL]/g,'1').replace(/S/g,'5')
+      .replace(/B/g,'8').replace(/Z/g,'2').replace(/G/g,'6');
+    // keep an optional trailing rarity letter (e.g. 066A) — only convert digits region
+    return head + tail;
+  }
 
   function loadLearned(){
     try { return JSON.parse(localStorage.getItem(LEARN_KEY)) || {}; }
@@ -82,14 +97,29 @@ const CardDB = (function () {
     if (!key) return null;
     const db = all();
     if (db[key]) return { card: { number: key, ...db[key] }, distance: 0, exact: true };
-    let best = null;
+    // Try digit-normalized form as an EXACT match (fixes O->0, S->5, etc.)
+    const nk = normNum(noisy);
+    if (nk !== key && db[nk]) return { card: { number: nk, ...db[nk] }, distance: 0, exact: true };
+    // Real card numbers look like PREFIX-NNN (e.g. BT11-066). If the noisy read
+    // has no digit or is very short, it's almost certainly junk — refuse to
+    // match rather than snap garbage like "E-16" onto a real short code.
+    if (key.length < 5 || !/[0-9]/.test(key)) return null;
+    let best = null, secondDist = Infinity;
     for (const num in db){
       // only compare same-length-ish numbers to keep it cheap + sane
       if (Math.abs(num.length - key.length) > 2) continue;
       const d = editDistance(key, num);
-      if (best === null || d < best.distance) best = { number: num, distance: d };
+      if (best === null || d < best.distance){ secondDist = best ? best.distance : secondDist; best = { number: num, distance: d }; }
+      else if (d < secondDist){ secondDist = d; }
     }
-    if (best && best.distance <= 2){   // tolerate up to 2 OCR errors
+    if (!best) return null;
+    // Tolerance scales with length: short codes must match almost exactly, so a
+    // 2-edit jump on a tiny code (the "Energy Marker" bug) is rejected.
+    const tol = key.length >= 7 ? 2 : 1;
+    // Distance 0-1 is trustworthy on its own. At the looser edge (distance 2) we
+    // also require it to beat the runner-up, to avoid an arbitrary pick.
+    const trustworthy = best.distance <= 1 || (best.distance <= tol && (secondDist - best.distance) >= 1);
+    if (trustworthy) {
       return { card: { number: best.number, ...db[best.number] }, distance: best.distance, exact: false };
     }
     return null;

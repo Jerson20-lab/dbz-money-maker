@@ -128,23 +128,41 @@ const Scanner = (function () {
       cornerIdx.forEach(i => { br += d[i]; bg += d[i + 1]; bb += d[i + 2]; });
       br /= 4; bg /= 4; bb /= 4;
       const THRESH = 48; // how different from bg counts as "content"
-      let minX = w, minY = h, maxX = 0, maxY = 0, hits = 0;
+      // Per-row / per-column content counts (projection profiles). These let us
+      // find the tightest card box and be robust to stray specks in the corners.
+      const rowHits = new Array(h).fill(0), colHits = new Array(w).fill(0);
+      let hits = 0;
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const i = (y * w + x) * 4;
           const diff = Math.abs(d[i] - br) + Math.abs(d[i + 1] - bg) + Math.abs(d[i + 2] - bb);
-          if (diff > THRESH) {
-            hits++;
-            if (x < minX) minX = x; if (x > maxX) maxX = x;
-            if (y < minY) minY = y; if (y > maxY) maxY = y;
-          }
+          if (diff > THRESH) { hits++; rowHits[y]++; colHits[x]++; }
         }
       }
+      // A row/column is "part of the card" if a meaningful fraction of it is content.
+      const rowMin = w * 0.12, colMin = h * 0.12;
+      let minY = 0; while (minY < h && rowHits[minY] < rowMin) minY++;
+      let maxY = h - 1; while (maxY > minY && rowHits[maxY] < rowMin) maxY--;
+      let minX = 0; while (minX < w && colHits[minX] < colMin) minX++;
+      let maxX = w - 1; while (maxX > minX && colHits[maxX] < colMin) maxX--;
       const area = (maxX - minX) * (maxY - minY);
       const frac = area / (w * h);
-      // require the content region to be a meaningful chunk of the frame
       const found = hits > (w * h * 0.05) && frac > 0.15 && (maxX > minX) && (maxY > minY);
       if (!found) return { found: false, cropped: srcCanvas };
+      // If the detected box is much wider/taller than a card (ratio ~0.714),
+      // pull it toward a card shape, centered on the detected region, so we crop
+      // the CARD and not surrounding clutter.
+      const CARD_RATIO = 2.5 / 3.5; // width/height ≈ 0.714
+      let bw = maxX - minX, bh = maxY - minY;
+      const cx = minX + bw / 2, cy = minY + bh / 2;
+      const curRatio = bw / bh;
+      if (curRatio > CARD_RATIO * 1.25) {          // too wide → clamp width
+        bw = bh * CARD_RATIO;
+      } else if (curRatio < CARD_RATIO * 0.8) {    // too tall → clamp height
+        bh = bw / CARD_RATIO;
+      }
+      minX = Math.max(0, cx - bw / 2); maxX = Math.min(w, cx + bw / 2);
+      minY = Math.max(0, cy - bh / 2); maxY = Math.min(h, cy + bh / 2);
       // map box back to full-res, with a small padding
       const inv = 1 / scale, pad = 6;
       const x0 = Math.max(0, (minX - pad) * inv);
@@ -153,7 +171,9 @@ const Scanner = (function () {
       const y1 = Math.min(srcCanvas.height, (maxY + pad) * inv);
       const cw = x1 - x0, ch = y1 - y0;
       if (cw < 40 || ch < 40) return { found: false, cropped: srcCanvas };
-      return { found: true, box: { x: x0, y: y0, w: cw, h: ch }, cropped: crop(srcCanvas, x0, y0, cw, ch) };
+      return { found: true, box: { x: x0, y: y0, w: cw, h: ch },
+               ratio: +(cw / ch).toFixed(3), fillFrac: +frac.toFixed(2),
+               cropped: crop(srcCanvas, x0, y0, cw, ch) };
     } catch (e) {
       return { found: false, cropped: srcCanvas };
     }
@@ -193,12 +213,23 @@ const Scanner = (function () {
   // across multiple preprocessing variants. Returns {raw, normalized, valid} best match.
   async function readNumberFromROIs(card){
     const W=card.width, H=card.height;
-    // number sits in the bottom band, either corner. Grab generous crops.
+    // The card number sits in the lower part of the card, but its exact height
+    // varies by layout:
+    //   - Fusion World: very bottom corners (y ~0.90-0.99)
+    //   - Masters:      a bit higher, above the flavor text (y ~0.74-0.86)
+    // So we scan a TALLER band from ~0.72 down, both corners, tight + loose.
     const rois = [
-      crop(card, W*0.55, H*0.90, W*0.45, H*0.09),  // bottom-right (tight)
-      crop(card, W*0.50, H*0.86, W*0.50, H*0.13),  // bottom-right (loose)
-      crop(card, 0,      H*0.90, W*0.45, H*0.09),  // bottom-left (tight)
-      crop(card, 0,      H*0.86, W*0.50, H*0.13)   // bottom-left (loose)
+      // very-bottom corners (Fusion World)
+      crop(card, W*0.55, H*0.90, W*0.45, H*0.09),
+      crop(card, W*0.50, H*0.86, W*0.50, H*0.13),
+      crop(card, 0,      H*0.90, W*0.45, H*0.09),
+      crop(card, 0,      H*0.86, W*0.50, H*0.13),
+      // higher band (Masters — number above flavor text)
+      crop(card, W*0.50, H*0.74, W*0.50, H*0.12),
+      crop(card, 0,      H*0.74, W*0.50, H*0.12),
+      // wide full-width strips catch numbers not hugging a corner
+      crop(card, 0,      H*0.72, W,      H*0.10),
+      crop(card, 0,      H*0.86, W,      H*0.12)
     ];
     const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-', tessedit_pageseg_mode: '7' };
     const tasks = [];
@@ -268,6 +299,9 @@ const Scanner = (function () {
       band:   roiNum.raw || '',                // for rarity/variant hints
       lines,
       detected: det.found,
+      detBox: det.box || null,
+      detRatio: det.ratio != null ? det.ratio : null,
+      detFill: det.fillFrac != null ? det.fillFrac : null,
       _conf: { full: fullR.data.confidence || 0, band: roiNum.srcConf || 0 }
     };
   }
@@ -564,6 +598,23 @@ const Scanner = (function () {
     // Primary number = multi-variant ROI reader; fall back to full-card text.
     let number = (raw.roiNum && raw.roiNum.normalized) ? raw.roiNum : extractCardNumber(raw.full);
     if (!number.normalized) number = extractCardNumber(raw.band);
+    // --- ALSO scan the full OCR text for any card-number-shaped tokens. On some
+    // layouts (e.g. Masters) the number prints above the flavor text where the
+    // ROI reader may miss it, but it still shows up in the full-card OCR (e.g.
+    // "BT11:066"). If one of those tokens is a KNOWN card, prefer it — it's far
+    // stronger evidence than a low-confidence ROI read. ---
+    let fullTextDbHit = null;
+    try {
+      if (typeof window !== 'undefined' && window.CardDB) {
+        const txt = (raw.full || '').toUpperCase().replace(/[:._]/g, '-');
+        const toks = txt.match(/[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?/g) || [];
+        for (const tk of toks){
+          const hit = window.CardDB.bestMatch(tk);
+          if (hit && hit.distance === 0){ fullTextDbHit = hit; break; }      // exact wins
+          if (hit && !fullTextDbHit) fullTextDbHit = hit;                     // else keep first close hit
+        }
+      }
+    } catch (e) {}
     // --- apply learned corrections (exact raw-key match only) ---
     nameCorrected = applyLearned('name', nameRawPick, nameCorrected);
     const learnedNum = applyLearned('number', number.raw, number.normalized);
@@ -571,18 +622,28 @@ const Scanner = (function () {
       number = { raw: number.raw, normalized: learnedNum, valid: true, learned: true };
     }
     // --- CardDB: snap a noisy number to a known card number (fuzzy, offline) ---
+    // Only trust the number for a DB match if it actually LOOKS like a real card
+    // number (PREFIX-NNN: 1-4 letters, dash, 2-3 digits). This stops a garbage
+    // read like "B-LY"/"E-16" from snapping onto a real short code (the
+    // "Energy Marker" bug). Weak reads fall through to the NAME matcher below.
+    const looksLikeCardNumber = /^[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?$/.test(number.normalized || '');
     let dbCard = null;
     try {
-      if (typeof window !== 'undefined' && window.CardDB && number.normalized) {
+      // 1) Strongest: an exact/near card number found anywhere in the full OCR text.
+      if (fullTextDbHit) {
+        dbCard = fullTextDbHit.card;
+        number = { raw: (number && number.raw) || fullTextDbHit.card.number, normalized: fullTextDbHit.card.number,
+                   valid: true, dbMatched: true, dbDistance: fullTextDbHit.distance, fromFullText: true };
+      }
+      // 2) Otherwise, trust the ROI number only if it LOOKS like a real number.
+      if (!dbCard && typeof window !== 'undefined' && window.CardDB && number.normalized && looksLikeCardNumber) {
         const m = window.CardDB.bestMatch(number.normalized);
         if (m) {
           dbCard = m.card;
-          // correct the number to the known one (e.g. STO1-O66 -> ST01-066)
           number = { raw: number.raw, normalized: m.card.number, valid: true, dbMatched: true, dbDistance: m.distance };
         }
       }
-      // Fallback: number read failed → try matching the OCR'd NAME against the DB.
-      // This rescues cards where the small number is unreadable but the title is legible.
+      // 3) Last resort: match the OCR'd NAME against the DB.
       if (!dbCard && typeof window !== 'undefined' && window.CardDB && window.CardDB.matchByName) {
         const mn = window.CardDB.matchByName(nameRawPick) || window.CardDB.matchByName(nameCorrected);
         if (mn) {
@@ -644,6 +705,9 @@ const Scanner = (function () {
       // ---- DIAGNOSTIC: everything we saw, for troubleshooting a bad read ----
       _diag: {
         cardDetected: raw.detected,
+        cardBox: raw.detBox ? `${Math.round(raw.detBox.w)}x${Math.round(raw.detBox.h)}` : '',
+        cardRatio: raw.detRatio,
+        cardFill: raw.detFill,
         fullText: raw.full,
         lines: (raw.lines || []).map(l => ({ text: l.text, conf: Math.round(l.conf), yTop: +(l.yTop||0).toFixed(2) })),
         namePicked: nameRawPick,

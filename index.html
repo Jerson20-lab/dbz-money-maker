@@ -40,7 +40,13 @@
         <p class="lead">Center the card so it <b>fills the frame</b>, tap to focus, and use good even lighting (avoid glare on foils). Then Capture &amp; Read.</p>
         <div id="cam-wrap" class="cam-wrap hidden">
           <video id="cam" playsinline muted></video>
-          <div class="cam-guide"><span class="guide-top">Name</span><span class="guide-code">Card #</span></div>
+          <div class="cam-guide">
+            <div class="guide-frame">
+              <span class="guide-top">Name here</span>
+              <span class="guide-code">Card # here</span>
+            </div>
+            <span class="guide-hint">Fill the frame with the card · flat · good light</span>
+          </div>
         </div>
         <canvas id="cap-canvas" class="hidden"></canvas>
         <div id="ocr-status" class="status hidden"></div>
@@ -526,7 +532,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v8.18';
+    window.APP_VERSION = 'v8.20';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');
