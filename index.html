@@ -522,9 +522,15 @@
             if (nw.state === 'installed' && navigator.serviceWorker.controller) { nw.postMessage && nw.postMessage('SKIP_WAITING'); }
           });
         });
-        let reloaded = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (reloaded) return; reloaded = true;
+          // Guard against reload LOOPS: only auto-reload once per browser session.
+          // (A per-page-load flag isn't enough — the reload starts a new page load,
+          // so an aggressively re-claiming SW could reload endlessly = "a problem
+          // repeatedly occurred" on iOS.)
+          let already = false;
+          try { already = sessionStorage.getItem('swReloaded') === '1'; } catch (e) {}
+          if (already) return;
+          try { sessionStorage.setItem('swReloaded', '1'); } catch (e) {}
           try { sessionStorage.setItem('appJustUpdated', '1'); } catch (e) {}
           window.location.reload();
         });
@@ -532,7 +538,7 @@
     });
     // one-time "App Updated" banner — reliable version-diff (doesn't rely on controllerchange).
     // APP_VERSION must match the sw.js cache version (dbz-vNN).
-    window.APP_VERSION = 'v8.20';
+    window.APP_VERSION = 'v8.21';
     window.addEventListener('load', () => {
       try {
         const seen = localStorage.getItem('dbz.seenVersion');

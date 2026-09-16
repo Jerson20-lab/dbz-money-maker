@@ -128,39 +128,30 @@ const Scanner = (function () {
       cornerIdx.forEach(i => { br += d[i]; bg += d[i + 1]; bb += d[i + 2]; });
       br /= 4; bg /= 4; bb /= 4;
       const THRESH = 48; // how different from bg counts as "content"
-      // Per-row / per-column content counts (projection profiles). These let us
-      // find the tightest card box and be robust to stray specks in the corners.
-      const rowHits = new Array(h).fill(0), colHits = new Array(w).fill(0);
-      let hits = 0;
+      let minX = w, minY = h, maxX = 0, maxY = 0, hits = 0;
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const i = (y * w + x) * 4;
           const diff = Math.abs(d[i] - br) + Math.abs(d[i + 1] - bg) + Math.abs(d[i + 2] - bb);
-          if (diff > THRESH) { hits++; rowHits[y]++; colHits[x]++; }
+          if (diff > THRESH) {
+            hits++;
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+          }
         }
       }
-      // A row/column is "part of the card" if a meaningful fraction of it is content.
-      const rowMin = w * 0.12, colMin = h * 0.12;
-      let minY = 0; while (minY < h && rowHits[minY] < rowMin) minY++;
-      let maxY = h - 1; while (maxY > minY && rowHits[maxY] < rowMin) maxY--;
-      let minX = 0; while (minX < w && colHits[minX] < colMin) minX++;
-      let maxX = w - 1; while (maxX > minX && colHits[maxX] < colMin) maxX--;
       const area = (maxX - minX) * (maxY - minY);
       const frac = area / (w * h);
       const found = hits > (w * h * 0.05) && frac > 0.15 && (maxX > minX) && (maxY > minY);
       if (!found) return { found: false, cropped: srcCanvas };
-      // If the detected box is much wider/taller than a card (ratio ~0.714),
-      // pull it toward a card shape, centered on the detected region, so we crop
-      // the CARD and not surrounding clutter.
-      const CARD_RATIO = 2.5 / 3.5; // width/height ≈ 0.714
+      // Gently pull an over-wide/over-tall box toward a card shape (0.714),
+      // centered on the detected region, so background clutter is excluded.
+      const CARD_RATIO = 2.5 / 3.5;
       let bw = maxX - minX, bh = maxY - minY;
       const cx = minX + bw / 2, cy = minY + bh / 2;
       const curRatio = bw / bh;
-      if (curRatio > CARD_RATIO * 1.25) {          // too wide → clamp width
-        bw = bh * CARD_RATIO;
-      } else if (curRatio < CARD_RATIO * 0.8) {    // too tall → clamp height
-        bh = bw / CARD_RATIO;
-      }
+      if (curRatio > CARD_RATIO * 1.25) bw = bh * CARD_RATIO;
+      else if (curRatio < CARD_RATIO * 0.8) bh = bw / CARD_RATIO;
       minX = Math.max(0, cx - bw / 2); maxX = Math.min(w, cx + bw / 2);
       minY = Math.max(0, cy - bh / 2); maxY = Math.min(h, cy + bh / 2);
       // map box back to full-res, with a small padding
