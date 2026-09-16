@@ -634,6 +634,7 @@ function renderScanResult(r){
     dg += `after normalize:    "${d.nameCorrected}"\n`;
     dg += `\n--- NUMBER (ROI reader) ---\n`;
     dg += `raw read:   "${d.numberRaw}"\n`;
+    dg += `all number ROI reads: ${d.numberRoiReads||'(none)'}\n`;
     dg += `normalized: "${d.numberNormalized}"  valid:${d.numberValid}  score:${d.numberScore}\n`;
     dg += `rarity text: "${d.rarityText}"\n`;
     dg += `\n--- DATABASE MATCH ---\n`;

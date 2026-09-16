@@ -115,37 +115,44 @@ const Scanner = (function () {
    */
   function detectCard(srcCanvas) {
     try {
-      const MAXW = 400;
+      const MAXW = 500;
       const scale = Math.min(1, MAXW / srcCanvas.width);
       const w = Math.max(1, Math.round(srcCanvas.width * scale));
       const h = Math.max(1, Math.round(srcCanvas.height * scale));
       const c = document.createElement('canvas'); c.width = w; c.height = h;
       const ctx = c.getContext('2d'); ctx.drawImage(srcCanvas, 0, 0, w, h);
       const d = ctx.getImageData(0, 0, w, h).data;
-      // background = average of the 4 corners
-      const cornerIdx = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + (w - 1)) * 4];
-      let br = 0, bg = 0, bb = 0;
-      cornerIdx.forEach(i => { br += d[i]; bg += d[i + 1]; bb += d[i + 2]; });
-      br /= 4; bg /= 4; bb /= 4;
-      const THRESH = 48; // how different from bg counts as "content"
-      let minX = w, minY = h, maxX = 0, maxY = 0, hits = 0;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const i = (y * w + x) * 4;
-          const diff = Math.abs(d[i] - br) + Math.abs(d[i + 1] - bg) + Math.abs(d[i + 2] - bb);
-          if (diff > THRESH) {
-            hits++;
-            if (x < minX) minX = x; if (x > maxX) maxX = x;
-            if (y < minY) minY = y; if (y > maxY) maxY = y;
-          }
+
+      // --- Grayscale + edge magnitude (Sobel-lite). Edges mark the card border and
+      // its internal detail; a uniform background/table has ~no edges. This works
+      // even when the card FILLS the frame (unlike corner-background subtraction),
+      // because we locate the card by where its edge-energy lives. ---
+      const gray = new Float32Array(w * h);
+      for (let p = 0, q = 0; p < d.length; p += 4, q++) gray[q] = 0.299*d[p] + 0.587*d[p+1] + 0.114*d[p+2];
+      const rowE = new Float32Array(h), colE = new Float32Array(w);
+      let total = 0;
+      for (let y = 1; y < h-1; y++) {
+        for (let x = 1; x < w-1; x++) {
+          const i = y*w + x;
+          const gx = Math.abs(gray[i-1] - gray[i+1]);
+          const gy = Math.abs(gray[i-w] - gray[i+w]);
+          const e = gx + gy;
+          if (e > 24) { rowE[y] += e; colE[x] += e; total += e; }
         }
       }
-      const area = (maxX - minX) * (maxY - minY);
-      const frac = area / (w * h);
-      const found = hits > (w * h * 0.05) && frac > 0.15 && (maxX > minX) && (maxY > minY);
+      if (total < 1) return { found: false, cropped: srcCanvas };
+      // Threshold each projection at a fraction of its own mean to find where the
+      // card's edge-energy band starts/ends (trims low-edge margins around it).
+      const rowMean = total / h, colMean = total / w;
+      const rTh = rowMean * 0.35, cTh = colMean * 0.35;
+      let minY = 0; while (minY < h-1 && rowE[minY] < rTh) minY++;
+      let maxY = h-1; while (maxY > minY && rowE[maxY] < rTh) maxY--;
+      let minX = 0; while (minX < w-1 && colE[minX] < cTh) minX++;
+      let maxX = w-1; while (maxX > minX && colE[maxX] < cTh) maxX--;
+      const frac = ((maxX-minX) * (maxY-minY)) / (w*h);
+      const found = frac > 0.10 && (maxX-minX) > w*0.25 && (maxY-minY) > h*0.25;
       if (!found) return { found: false, cropped: srcCanvas };
-      // Gently pull an over-wide/over-tall box toward a card shape (0.714),
-      // centered on the detected region, so background clutter is excluded.
+      // Snap toward card aspect (0.714), centered on the detected region.
       const CARD_RATIO = 2.5 / 3.5;
       let bw = maxX - minX, bh = maxY - minY;
       const cx = minX + bw / 2, cy = minY + bh / 2;
@@ -210,17 +217,17 @@ const Scanner = (function () {
     //   - Masters:      a bit higher, above the flavor text (y ~0.74-0.86)
     // So we scan a TALLER band from ~0.72 down, both corners, tight + loose.
     const rois = [
-      // very-bottom corners (Fusion World)
-      crop(card, W*0.55, H*0.90, W*0.45, H*0.09),
-      crop(card, W*0.50, H*0.86, W*0.50, H*0.13),
-      crop(card, 0,      H*0.90, W*0.45, H*0.09),
-      crop(card, 0,      H*0.86, W*0.50, H*0.13),
+      // very-bottom edge, full width (FW / energy numbers hug the bottom edge)
+      crop(card, 0,      H*0.93, W,      H*0.07),
+      crop(card, W*0.50, H*0.92, W*0.50, H*0.08),   // bottom-right
+      crop(card, 0,      H*0.92, W*0.50, H*0.08),   // bottom-left
+      // mid-bottom band
+      crop(card, W*0.55, H*0.88, W*0.45, H*0.09),
+      crop(card, 0,      H*0.86, W,      H*0.10),
       // higher band (Masters — number above flavor text)
-      crop(card, W*0.50, H*0.74, W*0.50, H*0.12),
-      crop(card, 0,      H*0.74, W*0.50, H*0.12),
-      // wide full-width strips catch numbers not hugging a corner
-      crop(card, 0,      H*0.72, W,      H*0.10),
-      crop(card, 0,      H*0.86, W,      H*0.12)
+      crop(card, W*0.45, H*0.74, W*0.55, H*0.10),
+      crop(card, 0,      H*0.74, W*0.55, H*0.10),
+      crop(card, 0,      H*0.72, W,      H*0.10)
     ];
     const numOpts = { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-', tessedit_pageseg_mode: '7' };
     // Build the preprocessed variant canvases. IMPORTANT (iOS memory): cap the
@@ -261,6 +268,8 @@ const Scanner = (function () {
       const score = (ex.valid?3:0) + (r.conf/100) + (/^[A-Z]{1,4}[0-9]{0,2}-[0-9]{2,3}[A-Z]?$/.test(ex.normalized)?2:0);
       if (!best || score>best.score) best = { ...ex, score, srcConf:r.conf };
     }
+    // Keep every raw ROI read for diagnostics (so we can SEE what each region saw).
+    const roiRaw = results.map(r => (r.text||'').replace(/\s+/g,' ').trim()).filter(Boolean);
     // --- separate RARITY / STAR pass (allow *, letters — no number-only whitelist) ---
     // The rarity code + ★ sits near the number. Read the bottom band WITHOUT the
     // restrictive charset so a star glyph can survive as * / k / x.
@@ -276,6 +285,7 @@ const Scanner = (function () {
     } catch(e){}
     const out = best || { raw:'', normalized:'', valid:false, score:0, srcConf:0 };
     out.rarityText = rarityText;
+    out.roiRaw = roiRaw;   // all raw ROI reads, for diagnostics
     return out;
   }
 
@@ -781,6 +791,7 @@ const Scanner = (function () {
         nameCorrected: nameCorrected,
         nameRoiReads: (raw.nameRois || []).map(n => `${n.text} (${Math.round(n.conf)}%)`).join(' | '),
         numberRaw: (raw.roiNum && raw.roiNum.raw) || '',
+        numberRoiReads: (raw.roiNum && raw.roiNum.roiRaw) ? raw.roiNum.roiRaw.join(' | ') : '',
         numberNormalized: number.normalized || '',
         numberValid: !!number.valid,
         numberScore: (raw.roiNum && raw.roiNum.score) || 0,
