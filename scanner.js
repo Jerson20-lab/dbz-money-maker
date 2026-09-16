@@ -581,6 +581,15 @@ const Scanner = (function () {
           number = { raw: number.raw, normalized: m.card.number, valid: true, dbMatched: true, dbDistance: m.distance };
         }
       }
+      // Fallback: number read failed → try matching the OCR'd NAME against the DB.
+      // This rescues cards where the small number is unreadable but the title is legible.
+      if (!dbCard && typeof window !== 'undefined' && window.CardDB && window.CardDB.matchByName) {
+        const mn = window.CardDB.matchByName(nameRawPick) || window.CardDB.matchByName(nameCorrected);
+        if (mn) {
+          dbCard = mn.card;
+          number = { raw: number.raw, normalized: mn.card.number, valid: true, dbMatched: true, dbDistance: mn.distance, byName: true };
+        }
+      }
     } catch (e) {}
     const rarityText = (raw.roiNum && raw.roiNum.rarityText) || '';
     const rarity = (dbCard && dbCard.rarity) || extractRarity(rarityText + ' ' + raw.band + ' ' + raw.full);

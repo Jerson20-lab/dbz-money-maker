@@ -95,6 +95,44 @@ const CardDB = (function () {
     return null;
   }
 
+  // Fuzzy-match a noisy OCR'd card NAME against DB names. Used as a fallback
+  // when the card-number read fails. Returns the single best match only when
+  // it is clearly good (proportional edit-distance threshold) AND unambiguous
+  // (comfortably better than the runner-up), so we never guess wildly.
+  function nameNorm(s){ return (s||'').toString().toUpperCase().replace(/[^A-Z0-9]/g,''); }
+  function matchByName(noisyName){
+    const key = nameNorm(noisyName);
+    if (key.length < 4) return null;            // too little signal to trust
+    const db = all();
+    let best = null, secondName = null;         // secondName = best distance among DIFFERENT names
+    for (const num in db){
+      const nm = nameNorm(db[num].name);
+      if (!nm) continue;
+      // cheap length pre-filter: names within ~40% length of each other
+      if (Math.abs(nm.length - key.length) > Math.max(4, key.length * 0.4)) continue;
+      const d = editDistance(key, nm);
+      if (best === null || d < best.distance){
+        // demote current best to "secondName" only if it is a DIFFERENT name
+        if (best && best.norm !== nm && (secondName === null || best.distance < secondName.distance)) {
+          secondName = { distance: best.distance };
+        }
+        best = { number: num, distance: d, len: nm.length, norm: nm };
+      } else if (nm !== best.norm && (secondName === null || d < secondName.distance)) {
+        secondName = { distance: d };            // a different name, worse or equal
+      }
+    }
+    if (!best) return null;
+    // Accept only a strong match: distance within ~25% of the name length, and
+    // meaningfully better than the best DIFFERENT-named card (ties among the
+    // same card's own variants are fine — we just pick one).
+    const tol = Math.max(2, Math.round(best.len * 0.25));
+    const clearlyBetter = !secondName || (secondName.distance - best.distance) >= 2 || secondName.distance > tol;
+    if (best.distance <= tol && clearlyBetter){
+      return { card: { number: best.number, ...db[best.number] }, distance: best.distance, exact: best.distance === 0 };
+    }
+    return null;
+  }
+
   function count(){ return Object.keys(all()).length; }
 
   // Official card image URL for a given number (uses img_link == number).
@@ -184,7 +222,7 @@ const CardDB = (function () {
   // load any previously-fetched bundled DB on startup
   loadBundledFromStorage();
 
-  return { learn, lookup, bestMatch, all, count, norm, fetchAndLoad, loadBundledFromStorage, variantsOf, imageUrl };
+  return { learn, lookup, bestMatch, matchByName, all, count, norm, fetchAndLoad, loadBundledFromStorage, variantsOf, imageUrl };
 })();
 
 if (typeof window !== 'undefined') window.CardDB = CardDB;
